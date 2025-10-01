@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monaco Editor Host</title>
+  <style>
+    html, body, #container { height:100%; width:100%; margin:0; padding:0; overflow:hidden; }
+  </style>
+  <!--
+    IMPORTANT: Place Monaco's "vs" folder next to this file so that:
+      src/main/resources/org/integratedmodelling/klabeditor/monaco/
+        - index.html (this file)
+        - monaco-bridge.js
+        - monaco-bridge.ts (source, optional)
+        - vs/ (copied from node_modules/monaco-editor/min/vs)
+
+    How to obtain the "vs" folder:
+      npm i monaco-editor
+      copy node_modules/monaco-editor/min/vs -> src/main/resources/org/integratedmodelling/klabeditor/monaco/vs
+
+    LSP integration requires bundling additional libraries (monaco-languageclient, vscode-ws-jsonrpc).
+    See monaco-bridge.ts for full commented instructions following:
+      https://github.com/Barahlush/monaco-lsp-guide
+  -->
+</head>
+<body>
+  <div id="container"></div>
+
+  <!-- Load Monaco AMD loader from local classpath -->
+  <script src="vs/loader.js"></script>
+  <script>
+    // Configure AMD loader to find 'vs' relatively
+    require.config({ paths: { 'vs': 'vs' } });
+  </script>
+
+  <!-- Our light JS bridge that wraps Monaco and exposes functions to Java -->
+  <script src="monaco-bridge.js"></script>
+
+  <script>
+    // Load Monaco editor and initialize our bridge internals
+    require(['vs/editor/editor.main'], function () {
+      if (window.MonacoBridge && window.MonacoBridge._onAmdReady) {
+        window.MonacoBridge._onAmdReady(document.getElementById('container'));
+      }
+    });
+  </script>
+</body>
+</html>
