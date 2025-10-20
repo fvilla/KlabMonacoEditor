@@ -22,13 +22,25 @@
 // Minimal ambient declarations for global AMD monaco
 declare const monaco: any;
 
+interface MarkerOptions {
+    message: string;
+    severity?: 'info' | 'warning' | 'error' | 'hint';
+}
+
 interface MonacoBridgeApi {
-  init(text: string, language?: string, theme?: string): void;
-  setText(text: string): void;
-  setLineNumbers(show: boolean): void;
-  isLineNumbersVisible(): boolean;
-  createMarker(line: number, message: string, severity?: 'info'|'warning'|'error'|'hint'): void;
-  connectLsp(wsUrl: string, languageId?: string): Promise<boolean>;
+    init(text: string, language?: string, theme?: string): void;
+
+    setText(text: string): void;
+
+    setLineNumbers(show: boolean): void;
+
+    isLineNumbersVisible(): boolean;
+
+    createMarker(line: number, message: string, severity?: 'info' | 'warning' | 'error' | 'hint'): void;
+
+    createMarkerByOffset(offset: number, length: number, message: string, severity?: 'info' | 'warning' | 'error' | 'hint'): void;
+
+    connectLsp(wsUrl: string, languageId?: string): Promise<boolean>;
   _onAmdReady(container: HTMLElement): void; // internal, called from index.html after AMD loads
 }
 
@@ -140,7 +152,26 @@ interface MonacoBridgeApi {
       });
     },
 
-    async connectLsp(wsUrl: string, languageId?: string): Promise<boolean> {
+      createMarkerByOffset(offset: number, length: number, message: string, severity: 'info' | 'warning' | 'error' | 'hint' = 'info') {
+          ensureReady(() => {
+              const model = state.editor?.getModel?.();
+              if (!model) return;
+              const owner = 'java-bridge';
+              const startPosition = model.getPositionAt(offset);
+              const endPosition = model.getPositionAt(offset + length);
+              const markers = [{
+                  startLineNumber: startPosition.lineNumber,
+                  endLineNumber: endPosition.lineNumber,
+                  startColumn: startPosition.column,
+                  endColumn: endPosition.column,
+                  message: message || '',
+                  severity: toSeverity(severity)
+              }];
+              monaco.editor.setModelMarkers(model, owner, markers);
+          });
+      },
+
+      async connectLsp(wsUrl: string, languageId?: string): Promise<boolean> {
       // See https://github.com/Barahlush/monaco-lsp-guide for a complete wiring.
       // The high-level steps are:
       // 1) Create a WebSocket to the LSP server (e.g., ws://localhost:PORT/your-lang)

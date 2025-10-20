@@ -20,33 +20,33 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * MonacoEditorView embeds a WebView that hosts the Microsoft Monaco editor and exposes
  * a simple Java<->JavaScript bridge to control it. All JS/CSS assets are expected to be
  * loaded from the Java classpath so the component works fully offline.
- *
+ * <p>
  * IMPORTANT: How to include Monaco distribution
  * --------------------------------------------
  * 1) Download/produce a Monaco Editor distribution, which includes a top-level "vs" folder
- *    containing "loader.js", "editor", etc. A simple way is to install via npm and copy
- *    the built assets:
- *       npm i monaco-editor
- *       copy node_modules/monaco-editor/min/vs  ->  src/main/resources/org/integratedmodelling/klabeditor/monaco/vs
- *
+ * containing "loader.js", "editor", etc. A simple way is to install via npm and copy
+ * the built assets:
+ * npm i monaco-editor
+ * copy node_modules/monaco-editor/min/vs  ->  src/main/resources/org/integratedmodelling/klabeditor/monaco/vs
+ * <p>
  * 2) This component loads an HTML page from classpath:
- *       /org/integratedmodelling/klabeditor/monaco/index.html
- *    That page references "vs/loader.js" relatively, so placing the "vs" directory alongside
- *    index.html (same resources folder) will make loading work.
- *
+ * /org/integratedmodelling/klabeditor/monaco/index.html
+ * That page references "vs/loader.js" relatively, so placing the "vs" directory alongside
+ * index.html (same resources folder) will make loading work.
+ * <p>
  * 3) The TypeScript bridge lives at:
- *       /org/integratedmodelling/klabeditor/monaco/monaco-bridge.ts
- *    and is provided compiled as:
- *       /org/integratedmodelling/klabeditor/monaco/monaco-bridge.js
- *    You can modify the TS file and recompile to JS with your preferred toolchain. For this
- *    example, the precompiled JS is shipped and used directly by the HTML.
- *
+ * /org/integratedmodelling/klabeditor/monaco/monaco-bridge.ts
+ * and is provided compiled as:
+ * /org/integratedmodelling/klabeditor/monaco/monaco-bridge.js
+ * You can modify the TS file and recompile to JS with your preferred toolchain. For this
+ * example, the precompiled JS is shipped and used directly by the HTML.
+ * <p>
  * 4) LSP integration:
- *    Proper Language Server Protocol support in Monaco requires integration with
- *    monaco-languageclient and vscode-ws-jsonrpc, following the architecture explained here:
- *    https://github.com/Barahlush/monaco-lsp-guide
- *    A bare WebSocket is not enough. The included bridge exposes a stub "connectLsp" method
- *    with extensive comments on how to wire it once you bundle the required libraries.
+ * Proper Language Server Protocol support in Monaco requires integration with
+ * monaco-languageclient and vscode-ws-jsonrpc, following the architecture explained here:
+ * https://github.com/Barahlush/monaco-lsp-guide
+ * A bare WebSocket is not enough. The included bridge exposes a stub "connectLsp" method
+ * with extensive comments on how to wire it once you bundle the required libraries.
  */
 public class MonacoEditorView extends StackPane {
 
@@ -120,32 +120,52 @@ public class MonacoEditorView extends StackPane {
         safeExec(js);
     }
 
-    /** Set entire editor text. */
+    /**
+     * Set entire editor text.
+     */
     public void setText(String text) {
         this.initialText = text == null ? "" : text;
         safeExec("window.MonacoBridge && window.MonacoBridge.setText(" + jsString(initialText) + ");");
     }
 
-    /** Toggle line number visibility. */
+    /**
+     * Toggle line number visibility.
+     */
     public void setLineNumbers(boolean show) {
         safeExec("window.MonacoBridge && window.MonacoBridge.setLineNumbers(" + show + ");");
     }
 
-    /** Query current line numbers visibility. Defaults to true if unknown. */
+    /**
+     * Query current line numbers visibility. Defaults to true if unknown.
+     */
     public boolean isLineNumbersVisible() {
         Object result = safeEval("(window.MonacoBridge && window.MonacoBridge.isLineNumbersVisible) ? window.MonacoBridge.isLineNumbersVisible() : true");
         if (result instanceof Boolean b) return b;
         return true;
     }
 
-    /** Create a marker at a given line. Severity may be one of: info, warning, error, hint. */
+
+    /**
+     * Create a marker at a given line. Severity may be one of: info, warning, error, hint.
+     */
     public void createMarker(int lineNumber, String message, String severity) {
         String js = "window.MonacoBridge && window.MonacoBridge.createMarker(" + lineNumber + "," +
                 jsString(message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
         safeExec(js);
     }
 
-    /** Optional: ask the bridge to connect to a local LSP server (see comments in TS). */
+    /**
+     * Create a marker at a given character offset position. Severity may be one of: info, warning, error, hint.
+     */
+    public void createMarkerByOffset(int offset, int length, String message, String severity) {
+        String js = "window.MonacoBridge && window.MonacoBridge.createMarkerByOffset(" + offset + "," + length + "," +
+                jsString(message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
+        safeExec(js);
+    }
+
+    /**
+     * Optional: ask the bridge to connect to a local LSP server (see comments in TS).
+     */
     public void connectLsp(String wsUrl, String languageId) {
         if (wsUrl == null || wsUrl.isBlank()) return;
         String lang = languageId == null ? "" : languageId;
@@ -187,7 +207,9 @@ public class MonacoEditorView extends StackPane {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    /** Object exposed to JS as window.JavaBridge to notify readiness, etc. */
+    /**
+     * Object exposed to JS as window.JavaBridge to notify readiness, etc.
+     */
     @SuppressWarnings("unused")
     public class JavaBridge {
         public void onEditorReady() {
@@ -198,8 +220,14 @@ public class MonacoEditorView extends StackPane {
 
     // Small utility to ensure WebView tracks parent size without external CSS
     private static final class RegionU {
-        static double width(Node n) { return 800; }
-        static double height(Node n) { return 600; }
+        static double width(Node n) {
+            return 800;
+        }
+
+        static double height(Node n) {
+            return 600;
+        }
+
         static void bindToParent(StackPane parent, WebView child) {
             child.prefWidthProperty().bind(parent.widthProperty());
             child.prefHeightProperty().bind(parent.heightProperty());
