@@ -4,6 +4,7 @@ import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
 import javafx.scene.Node;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
@@ -15,38 +16,32 @@ import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
- * MonacoEditorView embeds a WebView that hosts the Microsoft Monaco editor and exposes
- * a simple Java<->JavaScript bridge to control it. All JS/CSS assets are expected to be
- * loaded from the Java classpath so the component works fully offline.
+ * MonacoEditorView embeds a WebView that hosts the Microsoft Monaco editor and exposes a simple
+ * Java<->JavaScript bridge to control it. All JS/CSS assets are expected to be loaded from the Java classpath
+ * so the component works fully offline.
  * <p>
- * IMPORTANT: How to include Monaco distribution
- * --------------------------------------------
- * 1) Download/produce a Monaco Editor distribution, which includes a top-level "vs" folder
- * containing "loader.js", "editor", etc. A simple way is to install via npm and copy
- * the built assets:
- * npm i monaco-editor
- * copy node_modules/monaco-editor/min/vs  ->  src/main/resources/org/integratedmodelling/klabeditor/monaco/vs
+ * IMPORTANT: How to include Monaco distribution -------------------------------------------- 1)
+ * Download/produce a Monaco Editor distribution, which includes a top-level "vs" folder containing
+ * "loader.js", "editor", etc. A simple way is to install via npm and copy the built assets: npm i
+ * monaco-editor copy node_modules/monaco-editor/min/vs  ->
+ * src/main/resources/org/integratedmodelling/klabeditor/monaco/vs
  * <p>
- * 2) This component loads an HTML page from classpath:
- * /org/integratedmodelling/klabeditor/monaco/index.html
- * That page references "vs/loader.js" relatively, so placing the "vs" directory alongside
- * index.html (same resources folder) will make loading work.
+ * 2) This component loads an HTML page from classpath: /org/integratedmodelling/klabeditor/monaco/index.html
+ * That page references "vs/loader.js" relatively, so placing the "vs" directory alongside index.html (same
+ * resources folder) will make loading work.
  * <p>
- * 3) The TypeScript bridge lives at:
- * /org/integratedmodelling/klabeditor/monaco/monaco-bridge.ts
- * and is provided compiled as:
- * /org/integratedmodelling/klabeditor/monaco/monaco-bridge.js
- * You can modify the TS file and recompile to JS with your preferred toolchain. For this
- * example, the precompiled JS is shipped and used directly by the HTML.
+ * 3) The TypeScript bridge lives at: /org/integratedmodelling/klabeditor/monaco/monaco-bridge.ts and is
+ * provided compiled as: /org/integratedmodelling/klabeditor/monaco/monaco-bridge.js You can modify the TS
+ * file and recompile to JS with your preferred toolchain. For this example, the precompiled JS is shipped and
+ * used directly by the HTML.
  * <p>
- * 4) LSP integration:
- * Proper Language Server Protocol support in Monaco requires integration with
+ * 4) LSP integration: Proper Language Server Protocol support in Monaco requires integration with
  * monaco-languageclient and vscode-ws-jsonrpc, following the architecture explained here:
- * https://github.com/Barahlush/monaco-lsp-guide
- * A bare WebSocket is not enough. The included bridge exposes a stub "connectLsp" method
- * with extensive comments on how to wire it once you bundle the required libraries.
+ * https://github.com/Barahlush/monaco-lsp-guide A bare WebSocket is not enough. The included bridge exposes a
+ * stub "connectLsp" method with extensive comments on how to wire it once you bundle the required libraries.
  */
 public class MonacoEditorView extends StackPane {
 
@@ -62,6 +57,10 @@ public class MonacoEditorView extends StackPane {
     private String initialTheme = "vs-dark";
 
     public MonacoEditorView() {
+        this(null);
+    }
+
+    public MonacoEditorView(Consumer<String> saveCallback) {
         getChildren().add(webView);
         setPrefSize(800, 600);
 
@@ -72,11 +71,20 @@ public class MonacoEditorView extends StackPane {
         // Expose a Java connector for callbacks from JS
         webEngine.getLoadWorker().stateProperty().addListener(pageLoadListener());
 
+        if (saveCallback != null) {
+            onKeyPressedProperty().setValue(event -> {
+                if (event.isControlDown() && event.getCode() == KeyCode.S) {
+                    Thread.ofVirtual().start(() -> saveCallback.accept(getText()));
+                }
+            });
+        }
+
         // Load the editor host page from classpath
         URL url = MonacoEditorView.class.getResource("/org/integratedmodelling/klabeditor/monaco/index.html");
         if (url == null) {
             // Helpful message if resources are missing
-            String msg = "Missing Monaco resources. Please copy the 'vs' folder from monaco-editor and ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
+            String msg = "Missing Monaco resources. Please copy the 'vs' folder from monaco-editor and " +
+                    "ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
             webEngine.loadContent("<html><body><pre>" + escapeHtml(msg) + "</pre></body></html>");
         } else {
             webEngine.load(url.toExternalForm());
@@ -100,8 +108,8 @@ public class MonacoEditorView extends StackPane {
     }
 
     /**
-     * Initialize the editor with provided content and configuration.
-     * This can be called multiple times; subsequent calls will update the model text and language.
+     * Initialize the editor with provided content and configuration. This can be called multiple times;
+     * subsequent calls will update the model text and language.
      */
     public void loadEditor(String text, String language, String theme) {
         if (language == null || language.isBlank()) language = "plaintext";
@@ -115,8 +123,8 @@ public class MonacoEditorView extends StackPane {
     }
 
     private void initEditor(String text, String language, String theme) {
-        String js = "window.MonacoBridge && window.MonacoBridge.init(" +
-                jsString(text) + "," + jsString(language) + "," + jsString(theme) + ");";
+        String js = "window.MonacoBridge && window.MonacoBridge.init(" + jsString(text) + "," + jsString(
+                language) + "," + jsString(theme) + ");";
         safeExec(js);
     }
 
@@ -139,27 +147,41 @@ public class MonacoEditorView extends StackPane {
      * Query current line numbers visibility. Defaults to true if unknown.
      */
     public boolean isLineNumbersVisible() {
-        Object result = safeEval("(window.MonacoBridge && window.MonacoBridge.isLineNumbersVisible) ? window.MonacoBridge.isLineNumbersVisible() : true");
+        Object result = safeEval(
+                "(window.MonacoBridge && window.MonacoBridge.isLineNumbersVisible) ? window.MonacoBridge" + ".isLineNumbersVisible() : true");
         if (result instanceof Boolean b) return b;
         return true;
     }
 
 
     /**
+     * Get current text content from the editor.
+     *
+     * @return Current text content, or empty string if not available
+     */
+    public String getText() {
+        Object result = safeEval(
+                "window.MonacoBridge && window.MonacoBridge.getText ? window.MonacoBridge.getText() : ''");
+        return result != null ? result.toString() : "";
+    }
+
+    /**
      * Create a marker at a given line. Severity may be one of: info, warning, error, hint.
      */
     public void createMarker(int lineNumber, String message, String severity) {
-        String js = "window.MonacoBridge && window.MonacoBridge.createMarker(" + lineNumber + "," +
-                jsString(message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
+        String js = "window.MonacoBridge && window.MonacoBridge.createMarker(" + lineNumber + "," + jsString(
+                message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
         safeExec(js);
     }
 
     /**
-     * Create a marker at a given character offset position. Severity may be one of: info, warning, error, hint.
+     * Create a marker at a given character offset position. Severity may be one of: info, warning, error,
+     * hint.
      */
     public void createMarkerByOffset(int offset, int length, String message, String severity) {
-        String js = "window.MonacoBridge && window.MonacoBridge.createMarkerByOffset(" + offset + "," + length + "," +
-                jsString(message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
+        String js =
+                "window.MonacoBridge && window.MonacoBridge.createMarkerByOffset(" + offset + "," + length + "," + jsString(
+                message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
         safeExec(js);
     }
 
@@ -169,8 +191,9 @@ public class MonacoEditorView extends StackPane {
     public void connectLsp(String wsUrl, String languageId) {
         if (wsUrl == null || wsUrl.isBlank()) return;
         String lang = languageId == null ? "" : languageId;
-        String js = "window.MonacoBridge && window.MonacoBridge.connectLsp && window.MonacoBridge.connectLsp(" +
-                jsString(wsUrl) + "," + jsString(lang) + ");";
+        String js = "window.MonacoBridge && window.MonacoBridge.connectLsp && window.MonacoBridge" +
+                ".connectLsp(" + jsString(
+                wsUrl) + "," + jsString(lang) + ");";
         safeExec(js);
     }
 
