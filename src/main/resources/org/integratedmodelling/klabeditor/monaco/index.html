@@ -42,7 +42,26 @@
     // Load Monaco editor and initialize our bridge internals
     require(['vs/editor/editor.main'], function () {
       if (window.MonacoBridge && window.MonacoBridge._onAmdReady) {
-        window.MonacoBridge._onAmdReady(document.getElementById('container'));
+        const container = document.getElementById('container');
+        window.MonacoBridge._onAmdReady(container);
+        // If running outside JavaFX (no window.JavaBridge), auto-initialize so the page renders.
+        if (!(window.JavaBridge)) {
+          try {
+            const params = new URLSearchParams(window.location.search || '');
+            const language = params.get('language') || 'plaintext';
+            const theme = params.get('theme') || 'vs-dark';
+            let text = params.get('text') || '';
+            // Allow very long text, but avoid accidental megabytes in debug runs
+            if (text.length > 200000) {
+              text = text.substring(0, 200000) + "\n... [truncated]";
+            }
+            window.MonacoBridge.init(text, language, theme);
+          } catch (e) {
+            console.error('Auto-bootstrap failed:', e);
+            // Fallback minimal editor so the page is not blank
+            try { window.MonacoBridge.init('', 'plaintext', 'vs-dark'); } catch {}
+          }
+        }
       }
     });
   </script>

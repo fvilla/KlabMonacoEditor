@@ -11,6 +11,8 @@ import javafx.scene.web.WebView;
 import netscape.javascript.JSObject;
 
 import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -83,7 +85,10 @@ public class MonacoEditorView extends StackPane {
                     "ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
             webEngine.loadContent("<html><body><pre>" + escapeHtml(msg) + "</pre></body></html>");
         } else {
-            webEngine.load(url.toExternalForm());
+            // In debug mode we prefer to open the external browser with query parameters when loadEditor() is called.
+            if (!webView.isDebug()) {
+                webEngine.load(url.toExternalForm());
+            }
         }
     }
 
@@ -113,6 +118,23 @@ public class MonacoEditorView extends StackPane {
         this.initialText = text == null ? "" : text;
         this.initialLanguage = language;
         this.initialTheme = theme;
+        if (webView.isDebug()) {
+            // Build a classpath URL to index.html with query parameters so the external browser can auto-bootstrap
+            URL url = MonacoEditorView.class.getResource("/org/integratedmodelling/klabeditor/monaco/index.html");
+            if (url != null) {
+                String base = url.toExternalForm();
+                String q = "?language=" + URLEncoder.encode(initialLanguage, StandardCharsets.UTF_8)
+                        + "&theme=" + URLEncoder.encode(initialTheme, StandardCharsets.UTF_8)
+                        + "&text=" + URLEncoder.encode(initialText, StandardCharsets.UTF_8);
+                webEngine.load(base + q);
+            } else {
+                // Fall back to embedded message (even though in debug we don't display it internally)
+                String msg = "Missing Monaco resources. Please copy the 'vs' folder from monaco-editor and " +
+                        "ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
+                webEngine.loadContent("<html><body><pre>" + escapeHtml(msg) + "</pre></body></html>");
+            }
+            return;
+        }
         if (pageLoaded.get()) {
             initEditor(initialText, initialLanguage, initialTheme);
         }
