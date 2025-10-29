@@ -10,11 +10,7 @@ import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import netscape.javascript.JSObject;
 
-import java.io.InputStream;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -45,7 +41,7 @@ import java.util.function.Consumer;
  */
 public class MonacoEditorView extends StackPane {
 
-    private final WebView webView = new WebView();
+    private final DebugWebView webView = new DebugWebView(false);
     private final WebEngine webEngine = webView.getEngine();
 
     private final AtomicBoolean pageLoaded = new AtomicBoolean(false);
@@ -251,7 +247,7 @@ public class MonacoEditorView extends StackPane {
             return 600;
         }
 
-        static void bindToParent(StackPane parent, WebView child) {
+        static void bindToParent(StackPane parent, DebugWebView child) {
             child.prefWidthProperty().bind(parent.widthProperty());
             child.prefHeightProperty().bind(parent.heightProperty());
         }
