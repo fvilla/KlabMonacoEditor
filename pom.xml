@@ -14,6 +14,50 @@
         <junit.version>5.12.1</junit.version>
     </properties>
 
+    <licenses>
+        <license>
+            <name>GNU Affero General Public License (AGPL) version 3.0</name>
+            <url>http://www.gnu.org/licenses/agpl-3.0.en.html</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Ferdinando Villa</name>
+            <email>ferdinando.villa@bc3research.org</email>
+            <organization>Basque Centre for Climate Change (BC3); IKERBASQUE, Basque foundation for science
+            </organization>
+            <organizationUrl>http://www.bc3research.org</organizationUrl>
+        </developer>
+        <developer>
+            <name>Enrico Girotto</name>
+            <email>enrico.girotto@gmail.com</email>
+            <organization>Basque Centre for Climate Change (BC3)</organization>
+            <organizationUrl>http://www.bc3research.org</organizationUrl>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:http://github.com/fvilla/KlabMonacoEditor</connection>
+        <developerConnection>scm:git:https://github.com/fvilla/KlabMonacoEditor</developerConnection>
+        <url>https://github.com/fvilla/KlabMonacoEditor.git</url>
+    </scm>
+
+    <organization>
+        <name>integratedmodelling.org</name>
+        <url>https://www.integratedmodelling.org</url>
+    </organization>
+
+    <distributionManagement>
+        <snapshotRepository>
+            <id>ossrh</id>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+        </snapshotRepository>
+        <repository>
+            <id>ossrh</id>
+            <url>https://ossrh-staging-api.central.sonatype.com/service/local/staging/deploy/maven2/</url>
+        </repository>
+    </distributionManagement>
+
     <dependencies>
         <dependency>
             <groupId>org.openjfx</groupId>

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES5",
+    "lib": ["dom", "es5", "es2015"],
+    "module": "none",
+    "removeComments": true,
+    "sourceMap": false,
+    "noImplicitAny": false,
+    "outFile": "src/main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.js"
+  },
+  "include": [
+    "src/main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.ts"
+  ]
+}

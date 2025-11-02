@@ -48,6 +48,7 @@ public class MonacoEditorView extends StackPane {
 
     private final AtomicBoolean pageLoaded = new AtomicBoolean(false);
     private volatile JSObject window;
+    private Consumer<Integer> cursorPositionListener;
 
     // Memorize last requested init so we can re-apply if needed
     private String initialText = "";
@@ -144,6 +145,7 @@ public class MonacoEditorView extends StackPane {
         String js = "window.MonacoBridge && window.MonacoBridge.init(" + jsString(text) + "," + jsString(
                 language) + "," + jsString(theme) + ");";
         safeExec(js);
+        installCursorPositionHooks();
     }
 
     /**
@@ -204,6 +206,40 @@ public class MonacoEditorView extends StackPane {
     }
 
     /**
+     * Set the cursor position to a specified character offset in the document and reveal that position.
+     *
+     * @param offset The character offset position where to place the cursor
+     */
+    public void setCursorPosition(int offset) {
+        String js = "window.MonacoBridge && window.MonacoBridge.setCursorPosition(" + offset + ");";
+        safeExec(js);
+    }
+
+    /**
+     * Set a listener to be notified when the cursor position changes.
+     *
+     * @param listener Consumer that will receive the new cursor offset, or null to remove listener
+     */
+    public void setCursorPositionListener(Consumer<Integer> listener) {
+        this.cursorPositionListener = listener;
+        if (pageLoaded.get()) {
+            installCursorPositionHooks();
+        }
+    }
+
+    private void installCursorPositionHooks() {
+        String js = """
+                if (window.MonacoBridge && window.MonacoBridge.editor) {
+                    window.MonacoBridge.editor.onDidChangeCursorPosition(e => {
+                        const offset = window.MonacoBridge.editor.getModel().getOffsetAt(e.position);
+                        window.JavaBridge.onCursorPositionChanged(offset);
+                    });
+                }
+                """;
+        safeExec(js);
+    }
+
+    /**
      * Optional: ask the bridge to connect to a local LSP server (see comments in TS).
      */
     public void connectLsp(String wsUrl, String languageId) {
@@ -256,6 +292,12 @@ public class MonacoEditorView extends StackPane {
         public void onEditorReady() {
             // Currently we rely on JS to queue calls before ready; this is just a hook if needed.
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
+        }
+
+        public void onCursorPositionChanged(int offset) {
+            if (cursorPositionListener != null) {
+                Platform.runLater(() -> cursorPositionListener.accept(offset));
+            }
         }
     }
 
