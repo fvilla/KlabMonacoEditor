@@ -70,7 +70,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             default: return monaco.MarkerSeverity.Info;
         }
     }
-    var api = { editor: null,
+    var api = {
         _onAmdReady: function (container) {
             var _a;
             state.container = container;
@@ -85,6 +85,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
             if (language === void 0) { language = 'plaintext'; }
             if (theme === void 0) { theme = 'vs-dark'; }
             ensureReady(function () {
+                var _a, _b;
                 if (!state.container) {
                     console.error('Monaco container not available');
                     return;
@@ -100,176 +101,189 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                     try {
                         api.editor = state.editor;
                     }
-                    catch (e) { }
+                    catch (_c) { }
                     var model_1 = state.editor.getModel();
                     if (model_1) {
                         state.savedVersionId = model_1.getAlternativeVersionId();
                         state.dirty = false;
                         try {
-                            var _a = window.JavaBridge; _a && _a.onDirtyChanged && _a.onDirtyChanged(false);
+                            (_a = window.JavaBridge) === null || _a === void 0 ? void 0 : _a.onDirtyChanged(false);
                         }
-                        catch (e) { }
+                        catch (_d) { }
                         model_1.onDidChangeContent(function () {
-                            try {
-                                var newVersion = model_1.getAlternativeVersionId();
-                                var isDirty = newVersion !== state.savedVersionId;
-                                if (isDirty !== state.dirty) {
-                                    state.dirty = isDirty;
-                                    var _a = window.JavaBridge; _a && _a.onDirtyChanged && _a.onDirtyChanged(isDirty);
+                            var _a;
+                            var newVersion = model_1.getAlternativeVersionId();
+                            var isDirty = newVersion !== state.savedVersionId;
+                            if (isDirty !== state.dirty) {
+                                state.dirty = isDirty;
+                                try {
+                                    (_a = window.JavaBridge) === null || _a === void 0 ? void 0 : _a.onDirtyChanged(isDirty);
                                 }
+                                catch (_b) { }
                             }
-                            catch (e) { }
                         });
                     }
                     try {
                         state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS), function () {
+                            var _a, _b;
                             try {
                                 var currentModel = state.editor.getModel();
                                 var textNow = currentModel ? currentModel.getValue() : (state.editor.getValue ? state.editor.getValue() : '');
-                                var _a = window.JavaBridge; _a && _a.onSave && _a.onSave(textNow);
+                                (_a = window.JavaBridge) === null || _a === void 0 ? void 0 : _a.onSave(textNow);
                                 if (currentModel) {
                                     state.savedVersionId = currentModel.getAlternativeVersionId();
                                     if (state.dirty) {
                                         state.dirty = false;
-                                        var _b = window.JavaBridge; _b && _b.onDirtyChanged && _b.onDirtyChanged(false);
+                                        (_b = window.JavaBridge) === null || _b === void 0 ? void 0 : _b.onDirtyChanged(false);
                                     }
                                 }
                             }
-                            catch (e) { }
+                            catch (_c) { }
                         });
                     }
-                    catch (e) { }
-                    
-                    // Clipboard: Copy (Ctrl/Cmd + C)
+                    catch (_e) { }
                     try {
                         state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC), function () {
+                            var _a, _b, _c, _d, _e, _f;
                             try {
-                                var _a, _b;
-                                var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
-                                if (!model)
+                                var model_2 = (_b = (_a = state.editor).getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
+                                if (!model_2)
                                     return;
-                                var sels = (state.editor.getSelections && state.editor.getSelections()) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
-                                if (!sels || !sels.length)
+                                var sels0 = ((_d = (_c = state.editor).getSelections) === null || _d === void 0 ? void 0 : _d.call(_c)) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                                var selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                                if (!selections || !selections.length)
                                     return;
                                 var texts = [];
-                                for (var i = 0; i < sels.length; i++) {
-                                    var sel = sels[i];
+                                for (var _i = 0, selections_1 = selections; _i < selections_1.length; _i++) {
+                                    var sel = selections_1[_i];
                                     if (!sel)
                                         continue;
-                                    var t = model.getValueInRange(sel) || '';
-                                    texts.push(t);
+                                    var isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
+                                    if (isEmpty) {
+                                        var line = sel.startLineNumber;
+                                        var t = model_2.getLineContent ? (model_2.getLineContent(line) || '') : '';
+                                        t = t + '\n';
+                                        texts.push(t);
+                                    }
+                                    else {
+                                        var t = model_2.getValueInRange(sel) || '';
+                                        texts.push(t);
+                                    }
                                 }
                                 var clip = texts.join('\n');
                                 try {
-                                    var _c = window.JavaBridge; _c && _c.setClipboardText && _c.setClipboardText(clip);
+                                    (_f = (_e = window.JavaBridge) === null || _e === void 0 ? void 0 : _e.setClipboardText) === null || _f === void 0 ? void 0 : _f.call(_e, clip);
                                 }
-                                catch (e) { }
+                                catch (_g) { }
                             }
-                            catch (e) { }
+                            catch (_h) { }
                         });
                     }
-                    catch (e) { }
-                    
-                    // Clipboard: Cut (Ctrl/Cmd + X)
+                    catch (_f) { }
                     try {
                         state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX), function () {
+                            var _a, _b, _c, _d, _e, _f;
                             try {
-                                var _a, _b;
-                                var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
-                                if (!model)
+                                var model_3 = (_b = (_a = state.editor).getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
+                                if (!model_3)
                                     return;
-                                var sels = (state.editor.getSelections && state.editor.getSelections()) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
-                                if (!sels || !sels.length)
+                                var sels0 = ((_d = (_c = state.editor).getSelections) === null || _d === void 0 ? void 0 : _d.call(_c)) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                                var selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                                if (!selections || !selections.length)
                                     return;
                                 var texts = [];
-                                var anyNonEmpty = false;
-                                for (var i = 0; i < sels.length; i++) {
-                                    var sel = sels[i];
+                                var edits = [];
+                                for (var _i = 0, selections_2 = selections; _i < selections_2.length; _i++) {
+                                    var sel = selections_2[_i];
                                     if (!sel)
                                         continue;
-                                    var t = model.getValueInRange(sel) || '';
-                                    texts.push(t);
-                                    if (t.length > 0)
-                                        anyNonEmpty = true;
+                                    var isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
+                                    if (isEmpty) {
+                                        var line = sel.startLineNumber;
+                                        var lineText = model_3.getLineContent ? (model_3.getLineContent(line) || '') : '';
+                                        texts.push(lineText + '\n');
+                                        var lineCount = model_3.getLineCount ? model_3.getLineCount() : 0;
+                                        if (line < lineCount) {
+                                            edits.push({ range: { startLineNumber: line, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, text: '', forceMoveMarkers: true });
+                                        }
+                                        else {
+                                            var maxCol = model_3.getLineMaxColumn ? model_3.getLineMaxColumn(line) : 1;
+                                            edits.push({ range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: maxCol }, text: '', forceMoveMarkers: true });
+                                        }
+                                    }
+                                    else {
+                                        var t = model_3.getValueInRange(sel) || '';
+                                        texts.push(t);
+                                        edits.push({ range: sel, text: '', forceMoveMarkers: true });
+                                    }
                                 }
                                 var clip = texts.join('\n');
                                 try {
-                                    var _c = window.JavaBridge; _c && _c.setClipboardText && _c.setClipboardText(clip);
+                                    (_f = (_e = window.JavaBridge) === null || _e === void 0 ? void 0 : _e.setClipboardText) === null || _f === void 0 ? void 0 : _f.call(_e, clip);
                                 }
-                                catch (e) { }
-                                if (anyNonEmpty) {
-                                    var edits = [];
-                                    for (var i = 0; i < sels.length; i++) {
-                                        var sel = sels[i];
-                                        if (!sel)
-                                            continue;
-                                        edits.push({ range: sel, text: '', forceMoveMarkers: true });
+                                catch (_g) { }
+                                if (edits.length) {
+                                    try {
+                                        state.editor.pushUndoStop && state.editor.pushUndoStop();
                                     }
-                                    if (edits.length) {
-                                        try {
-                                            state.editor.executeEdits('java-bridge', edits);
-                                        }
-                                        catch (e) { }
+                                    catch (_h) { }
+                                    try {
+                                        state.editor.executeEdits('java-bridge', edits);
                                     }
+                                    catch (_j) { }
+                                    try {
+                                        state.editor.pushUndoStop && state.editor.pushUndoStop();
+                                    }
+                                    catch (_k) { }
                                 }
                             }
-                            catch (e) { }
+                            catch (_l) { }
                         });
                     }
-                    catch (e) { }
-                    
-                    // Clipboard: Paste (Ctrl/Cmd + V)
+                    catch (_g) { }
                     try {
                         state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV), function () {
+                            var _a, _b, _c, _d, _e, _f;
                             try {
-                                var _a, _b;
-                                var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
-                                if (!model)
+                                var model_4 = (_b = (_a = state.editor).getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
+                                if (!model_4)
                                     return;
-                                var text = '';
+                                var text_1 = '';
                                 try {
-                                    var _c = window.JavaBridge; text = (_c && _c.getClipboardText && _c.getClipboardText()) || '';
+                                    text_1 = ((_d = (_c = window.JavaBridge) === null || _c === void 0 ? void 0 : _c.getClipboardText) === null || _d === void 0 ? void 0 : _d.call(_c)) || '';
                                 }
-                                catch (e) { }
-                                if (text == null)
-                                    text = '';
-                                var sels = (state.editor.getSelections && state.editor.getSelections()) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                                catch (_g) { }
+                                if (text_1 == null)
+                                    text_1 = '';
+                                var sels = ((_f = (_e = state.editor).getSelections) === null || _f === void 0 ? void 0 : _f.call(_e)) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
                                 if (!sels || !sels.length)
                                     return;
-                                var edits = [];
-                                for (var i = 0; i < sels.length; i++) {
-                                    var sel = sels[i];
-                                    if (!sel)
-                                        continue;
-                                    edits.push({ range: sel, text: text, forceMoveMarkers: true });
-                                }
+                                var edits = sels.filter(Boolean).map(function (sel) { return ({ range: sel, text: text_1, forceMoveMarkers: true }); });
                                 if (edits.length) {
                                     try {
                                         state.editor.executeEdits('java-bridge', edits);
                                     }
-                                    catch (e) { }
+                                    catch (_h) { }
                                 }
                             }
-                            catch (e) { }
+                            catch (_j) { }
                         });
                     }
-                    catch (e) { }
-                    
-                    // Fallback: Intercept keydown at Monaco level to ensure WebView doesn't swallow clipboard shortcuts
+                    catch (_h) { }
                     try {
-                        var KC = monaco.KeyCode;
-                        var doCopy = function () {
-                            var _a, _b;
-                            var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
+                        var KC_1 = monaco.KeyCode;
+                        var doCopy_1 = function () {
+                            var _a, _b, _c, _d, _e, _f;
+                            var model = (_b = (_a = state.editor).getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
                             if (!model)
                                 return;
-                            var sels0 = (state.editor.getSelections && state.editor.getSelections()) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                            var sels0 = ((_d = (_c = state.editor).getSelections) === null || _d === void 0 ? void 0 : _d.call(_c)) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
                             var selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
                             if (!selections || !selections.length)
                                 return;
                             var texts = [];
-                            for (var i = 0; i < selections.length; i++) {
-                                var sel = selections[i];
+                            for (var _i = 0, selections_3 = selections; _i < selections_3.length; _i++) {
+                                var sel = selections_3[_i];
                                 if (!sel)
                                     continue;
                                 var isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
@@ -286,23 +300,23 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                             }
                             var clip = texts.join('\n');
                             try {
-                                var _c = window.JavaBridge; _c && _c.setClipboardText && _c.setClipboardText(clip);
+                                (_f = (_e = window.JavaBridge) === null || _e === void 0 ? void 0 : _e.setClipboardText) === null || _f === void 0 ? void 0 : _f.call(_e, clip);
                             }
-                            catch (e) { }
+                            catch (_g) { }
                         };
-                        var doCut = function () {
-                            var _a, _b;
-                            var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
+                        var doCut_1 = function () {
+                            var _a, _b, _c, _d, _e, _f;
+                            var model = (_b = (_a = state.editor).getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
                             if (!model)
                                 return;
-                            var sels0 = (state.editor.getSelections && state.editor.getSelections()) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                            var sels0 = ((_d = (_c = state.editor).getSelections) === null || _d === void 0 ? void 0 : _d.call(_c)) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
                             var selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
                             if (!selections || !selections.length)
                                 return;
                             var texts = [];
                             var edits = [];
-                            for (var i = 0; i < selections.length; i++) {
-                                var sel = selections[i];
+                            for (var _i = 0, selections_4 = selections; _i < selections_4.length; _i++) {
+                                var sel = selections_4[_i];
                                 if (!sel)
                                     continue;
                                 var isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
@@ -327,82 +341,85 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                             }
                             var clip = texts.join('\n');
                             try {
-                                var _c = window.JavaBridge; _c && _c.setClipboardText && _c.setClipboardText(clip);
+                                (_f = (_e = window.JavaBridge) === null || _e === void 0 ? void 0 : _e.setClipboardText) === null || _f === void 0 ? void 0 : _f.call(_e, clip);
                             }
-                            catch (e) { }
+                            catch (_g) { }
                             if (edits.length) {
                                 try {
                                     state.editor.pushUndoStop && state.editor.pushUndoStop();
                                 }
-                                catch (e) { }
+                                catch (_h) { }
                                 try {
                                     state.editor.executeEdits('java-bridge', edits);
                                 }
-                                catch (e) { }
+                                catch (_j) { }
                                 try {
                                     state.editor.pushUndoStop && state.editor.pushUndoStop();
                                 }
-                                catch (e) { }
+                                catch (_k) { }
                             }
                         };
-                        var doPaste = function () {
-                            var _a, _b;
-                            var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
+                        var doPaste_1 = function () {
+                            var _a, _b, _c, _d, _e, _f;
+                            var model = (_b = (_a = state.editor).getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
                             if (!model)
                                 return;
                             var text = '';
                             try {
-                                var _c = window.JavaBridge; text = (_c && _c.getClipboardText && _c.getClipboardText()) || '';
+                                text = ((_d = (_c = window.JavaBridge) === null || _c === void 0 ? void 0 : _c.getClipboardText) === null || _d === void 0 ? void 0 : _d.call(_c)) || '';
                             }
-                            catch (e) { }
+                            catch (_g) { }
                             if (text == null)
                                 text = '';
-                            var sels0 = (state.editor.getSelections && state.editor.getSelections()) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                            var sels0 = ((_f = (_e = state.editor).getSelections) === null || _f === void 0 ? void 0 : _f.call(_e)) || (state.editor.getSelection ? [state.editor.getSelection()] : []);
                             var selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
                             if (!selections || !selections.length)
                                 return;
-                            var edits = [];
-                            for (var i = 0; i < selections.length; i++) {
-                                var sel = selections[i];
-                                if (!sel)
-                                    continue;
-                                edits.push({ range: sel, text: text, forceMoveMarkers: true });
-                            }
+                            var edits = selections.filter(Boolean).map(function (sel) { return ({ range: sel, text: text, forceMoveMarkers: true }); });
                             if (edits.length) {
                                 try {
                                     state.editor.pushUndoStop && state.editor.pushUndoStop();
                                 }
-                                catch (e) { }
+                                catch (_h) { }
                                 try {
                                     state.editor.executeEdits('java-bridge', edits);
                                 }
-                                catch (e) { }
+                                catch (_j) { }
                                 try {
                                     state.editor.pushUndoStop && state.editor.pushUndoStop();
                                 }
-                                catch (e) { }
+                                catch (_k) { }
                             }
                         };
                         state.editor.onKeyDown(function (e) {
                             var isCtrl = !!(e.ctrlKey || e.metaKey);
                             var isShift = !!e.shiftKey;
                             var code = e.keyCode;
-                            var isCopy = (isCtrl && code === KC.KeyC);
-                            var isCut = (isCtrl && code === KC.KeyX);
-                            var isPaste = (isCtrl && code === KC.KeyV) || (isShift && !isCtrl && code === KC.Insert);
-                            var isCtrlInsertCopy = (isCtrl && !isShift && code === KC.Insert);
+                            var isCopy = (isCtrl && code === KC_1.KeyC) || (!isCtrl && !isShift && code === KC_1.F6 && false);
+                            var isCut = (isCtrl && code === KC_1.KeyX);
+                            var isPaste = (isCtrl && code === KC_1.KeyV) || (isShift && !isCtrl && code === KC_1.Insert);
+                            var isCtrlInsertCopy = (isCtrl && !isShift && code === KC_1.Insert);
                             if (isCopy || isCtrlInsertCopy) {
-                                doCopy(); e.preventDefault(); e.stopPropagation(); return;
+                                doCopy_1();
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
                             }
                             if (isCut) {
-                                doCut(); e.preventDefault(); e.stopPropagation(); return;
+                                doCut_1();
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
                             }
                             if (isPaste) {
-                                doPaste(); e.preventDefault(); e.stopPropagation(); return;
+                                doPaste_1();
+                                e.preventDefault();
+                                e.stopPropagation();
+                                return;
                             }
                         });
                     }
-                    catch (e) { }
+                    catch (_j) { }
                 }
                 else {
                     state.editor.updateOptions({ theme: theme });
@@ -414,18 +431,21 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                         if (state.dirty) {
                             state.dirty = false;
                             try {
-                                var _a = window.JavaBridge; _a && _a.onDirtyChanged && _a.onDirtyChanged(false);
+                                (_b = window.JavaBridge) === null || _b === void 0 ? void 0 : _b.onDirtyChanged(false);
                             }
-                            catch (e) { }
+                            catch (_k) { }
                         }
                     }
-                    try { api.editor = state.editor; } catch (e) { }
+                    try {
+                        api.editor = state.editor;
+                    }
+                    catch (_l) { }
                 }
             });
         },
         setText: function (text) {
             ensureReady(function () {
-                var _a, _b;
+                var _a, _b, _c;
                 var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
                 if (model) {
                     model.setValue(text || '');
@@ -433,22 +453,22 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                         state.savedVersionId = model.getAlternativeVersionId();
                         if (state.dirty) {
                             state.dirty = false;
-                            try { var _c = window.JavaBridge; _c && _c.onDirtyChanged && _c.onDirtyChanged(false); } catch (e) { }
+                            (_c = window.JavaBridge) === null || _c === void 0 ? void 0 : _c.onDirtyChanged(false);
                         }
                     }
-                    catch (e) { }
+                    catch (_d) { }
                 }
             });
         },
         getText: function () {
+            var _a, _b, _c;
             try {
-                var _a, _b;
                 var model = (_b = (_a = state.editor) === null || _a === void 0 ? void 0 : _a.getModel) === null || _b === void 0 ? void 0 : _b.call(_a);
                 if (model)
                     return model.getValue() || '';
-                return state.editor && state.editor.getValue ? (state.editor.getValue() || '') : '';
+                return ((_c = state.editor) === null || _c === void 0 ? void 0 : _c.getValue) ? (state.editor.getValue() || '') : '';
             }
-            catch (e) {
+            catch (_d) {
                 return '';
             }
         },
@@ -462,11 +482,11 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
                 try {
                     state.editor.setPosition(pos);
                 }
-                catch (e) { }
+                catch (_c) { }
                 try {
                     state.editor.revealPositionInCenter(pos);
                 }
-                catch (e) { }
+                catch (_d) { }
             });
         },
         setLineNumbers: function (show) {

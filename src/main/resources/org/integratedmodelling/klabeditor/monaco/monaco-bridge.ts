@@ -89,7 +89,7 @@ interface MonacoBridgeApi {
 
   // @ts-ignore
     const api: MonacoBridgeApi = {
-    editor: null,
+//    editor: null,
     _onAmdReady(container: HTMLElement) {
       state.container = container;
       // Do nothing else here; init() will create the editor. Mark as soft-ready so queued init runs.
