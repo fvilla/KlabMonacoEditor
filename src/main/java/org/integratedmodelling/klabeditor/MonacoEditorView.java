@@ -5,6 +5,9 @@ import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
 import javafx.scene.Node;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
@@ -13,8 +16,11 @@ import netscape.javascript.JSObject;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * MonacoEditorView embeds a WebView that hosts the Microsoft Monaco editor and exposes a simple
@@ -49,6 +55,9 @@ public class MonacoEditorView extends StackPane {
     private final AtomicBoolean pageLoaded = new AtomicBoolean(false);
     private volatile JSObject window;
     private Consumer<Integer> cursorPositionListener;
+    private Consumer<String> onSaveListener;
+    private Consumer<Boolean> onDirtyChangedListener;
+    private volatile boolean isDirty;
 
     // Memorize last requested init so we can re-apply if needed
     private String initialText = "";
@@ -70,12 +79,9 @@ public class MonacoEditorView extends StackPane {
         // Expose a Java connector for callbacks from JS
         webEngine.getLoadWorker().stateProperty().addListener(pageLoadListener());
 
+        // Store optional save callback to be invoked by Monaco JS bridge (Ctrl/Cmd+S)
         if (saveCallback != null) {
-            onKeyPressedProperty().setValue(event -> {
-                if (event.isControlDown() && event.getCode() == KeyCode.S) {
-                    Thread.ofVirtual().start(() -> saveCallback.accept(getText()));
-                }
-            });
+            setOnSave(saveCallback);
         }
 
         // Load the editor host page from classpath
@@ -186,6 +192,29 @@ public class MonacoEditorView extends StackPane {
     }
 
     /**
+     * Set a callback to be invoked when the user triggers Save (Ctrl/Cmd+S) inside Monaco.
+     * The full current text will be passed to the consumer.
+     */
+    public void setOnSave(Consumer<String> onSave) {
+        this.onSaveListener = onSave;
+    }
+
+    /**
+     * Set a callback to be notified when the editor dirty state changes.
+     * true means there are unsaved changes; false means the content matches last saved baseline.
+     */
+    public void setOnDirtyChanged(Consumer<Boolean> onDirtyChanged) {
+        this.onDirtyChangedListener = onDirtyChanged;
+    }
+
+    /**
+     * Current dirty flag as last reported by the JS bridge.
+     */
+    public boolean isDirty() {
+        return isDirty;
+    }
+
+    /**
      * Create a marker at a given line. Severity may be one of: info, warning, error, hint.
      */
     public void createMarker(int lineNumber, String message, String severity) {
@@ -274,6 +303,32 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
+    // ---------- FX thread helpers ----------
+    private static void runOnFxAndWait(Runnable action) {
+        if (Platform.isFxApplicationThread()) {
+            action.run();
+            return;
+        }
+        CountDownLatch latch = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            try { action.run(); } finally { latch.countDown(); }
+        });
+        try { latch.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    }
+
+    private static <T> T runOnFxAndWait(Supplier<T> supplier) {
+        if (Platform.isFxApplicationThread()) {
+            return supplier.get();
+        }
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<T> ref = new AtomicReference<>();
+        Platform.runLater(() -> {
+            try { ref.set(supplier.get()); } finally { latch.countDown(); }
+        });
+        try { latch.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        return ref.get();
+    }
+
     private static String jsString(String s) {
         if (s == null) return "null";
         String esc = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
@@ -298,6 +353,40 @@ public class MonacoEditorView extends StackPane {
             if (cursorPositionListener != null) {
                 Platform.runLater(() -> cursorPositionListener.accept(offset));
             }
+        }
+
+        public void onSave(String text) {
+            if (onSaveListener != null) {
+                Platform.runLater(() -> onSaveListener.accept(text == null ? "" : text));
+            }
+        }
+
+        public void onDirtyChanged(boolean dirty) {
+            isDirty = dirty;
+            if (onDirtyChangedListener != null) {
+                Platform.runLater(() -> onDirtyChangedListener.accept(dirty));
+            }
+        }
+
+        // -------- Clipboard bridge --------
+        public void setClipboardText(String text) {
+            runOnFxAndWait(() -> {
+                Clipboard clipboard = Clipboard.getSystemClipboard();
+                ClipboardContent content = new ClipboardContent();
+                content.putString(text == null ? "" : text);
+                clipboard.setContent(content);
+            });
+        }
+
+        public String getClipboardText() {
+            return runOnFxAndWait(() -> {
+                Clipboard clipboard = Clipboard.getSystemClipboard();
+                if (clipboard.hasString()) {
+                    String s = clipboard.getString();
+                    return s == null ? "" : s;
+                }
+                return "";
+            });
         }
     }
 

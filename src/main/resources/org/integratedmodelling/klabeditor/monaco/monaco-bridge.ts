@@ -31,6 +31,9 @@ interface MonacoBridgeApi {
     init(text: string, language?: string, theme?: string): void;
 
     setText(text: string): void;
+    getText(): string;
+
+    setCursorPosition(offset: number): void;
 
     setLineNumbers(show: boolean): void;
 
@@ -50,13 +53,17 @@ interface MonacoBridgeApi {
     container: HTMLElement | null,
     ready: boolean,
     showLineNumbers: boolean,
-    pendingCalls: Array<() => void>
+    pendingCalls: Array<() => void>,
+    savedVersionId: number,
+    dirty: boolean
   } = {
     editor: null,
     container: null,
     ready: false,
     showLineNumbers: true,
-    pendingCalls: []
+    pendingCalls: [],
+    savedVersionId: 0,
+    dirty: false
   };
 
   function flush() {
@@ -82,6 +89,7 @@ interface MonacoBridgeApi {
 
   // @ts-ignore
     const api: MonacoBridgeApi = {
+    editor: null,
     _onAmdReady(container: HTMLElement) {
       state.container = container;
       // Do nothing else here; init() will create the editor. Mark as soft-ready so queued init runs.
@@ -105,13 +113,248 @@ interface MonacoBridgeApi {
             automaticLayout: true,
             lineNumbers: state.showLineNumbers ? 'on' : 'off',
           });
+
+          // Expose editor directly (used by Java for certain hooks)
+          try { (api as any).editor = state.editor; } catch {}
+
+          const model = state.editor.getModel();
+          if (model) {
+            // Track dirty status based on model version
+            state.savedVersionId = model.getAlternativeVersionId();
+            state.dirty = false;
+            try { (window as any).JavaBridge?.onDirtyChanged(false); } catch {}
+
+            // Listen to content changes to update dirty flag
+            model.onDidChangeContent(() => {
+              const newVersion = model.getAlternativeVersionId();
+              const isDirty = newVersion !== state.savedVersionId;
+              if (isDirty !== state.dirty) {
+                state.dirty = isDirty;
+                try { (window as any).JavaBridge?.onDirtyChanged(isDirty); } catch {}
+              }
+            });
+          }
+
+          // Install save keybinding (Ctrl/Cmd + S)
+          try {
+            state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS), () => {
+              try {
+                const currentModel = state.editor.getModel();
+                const textNow = currentModel ? currentModel.getValue() : (state.editor.getValue ? state.editor.getValue() : '');
+                (window as any).JavaBridge?.onSave(textNow);
+                if (currentModel) {
+                  state.savedVersionId = currentModel.getAlternativeVersionId();
+                  if (state.dirty) {
+                    state.dirty = false;
+                    (window as any).JavaBridge?.onDirtyChanged(false);
+                  }
+                }
+              } catch {}
+            });
+          } catch {}
+
+          // Clipboard: Copy (Ctrl/Cmd + C)
+          try {
+            state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC), () => {
+              try {
+                const model = state.editor.getModel?.();
+                if (!model) return;
+                const sels0 = state.editor.getSelections?.() || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                const selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                if (!selections || !selections.length) return;
+                const texts: string[] = [];
+                for (const sel of selections) {
+                  if (!sel) continue;
+                  const isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
+                  if (isEmpty) {
+                    const line = sel.startLineNumber;
+                    let t = model.getLineContent ? (model.getLineContent(line) || '') : '';
+                    // Match common editor behavior: copy entire line including newline when no selection
+                    t = t + '\n';
+                    texts.push(t);
+                  } else {
+                    const t = model.getValueInRange(sel) || '';
+                    texts.push(t);
+                  }
+                }
+                const clip = texts.join('\n');
+                try { (window as any).JavaBridge?.setClipboardText?.(clip); } catch {}
+              } catch {}
+            });
+          } catch {}
+
+          // Clipboard: Cut (Ctrl/Cmd + X)
+          try {
+            state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyX), () => {
+              try {
+                const model = state.editor.getModel?.();
+                if (!model) return;
+                const sels0 = state.editor.getSelections?.() || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                const selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                if (!selections || !selections.length) return;
+                // Copy first
+                const texts: string[] = [];
+                const edits: any[] = [];
+                for (const sel of selections) {
+                  if (!sel) continue;
+                  const isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
+                  if (isEmpty) {
+                    const line = sel.startLineNumber;
+                    const lineText = model.getLineContent ? (model.getLineContent(line) || '') : '';
+                    texts.push(lineText + '\n');
+                    const lineCount = model.getLineCount ? model.getLineCount() : 0;
+                    if (line < lineCount) {
+                      edits.push({ range: { startLineNumber: line, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, text: '', forceMoveMarkers: true });
+                    } else {
+                      const maxCol = model.getLineMaxColumn ? model.getLineMaxColumn(line) : 1;
+                      edits.push({ range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: maxCol }, text: '', forceMoveMarkers: true });
+                    }
+                  } else {
+                    const t = model.getValueInRange(sel) || '';
+                    texts.push(t);
+                    edits.push({ range: sel, text: '', forceMoveMarkers: true });
+                  }
+                }
+                const clip = texts.join('\n');
+                try { (window as any).JavaBridge?.setClipboardText?.(clip); } catch {}
+                if (edits.length) {
+                  try { state.editor.pushUndoStop && state.editor.pushUndoStop(); } catch {}
+                  try { state.editor.executeEdits('java-bridge', edits); } catch {}
+                  try { state.editor.pushUndoStop && state.editor.pushUndoStop(); } catch {}
+                }
+              } catch {}
+            });
+          } catch {}
+
+          // Clipboard: Paste (Ctrl/Cmd + V)
+          try {
+            state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyV), () => {
+              try {
+                const model = state.editor.getModel?.();
+                if (!model) return;
+                let text: string = '';
+                try { text = (window as any).JavaBridge?.getClipboardText?.() || ''; } catch {}
+                if (text == null) text = '';
+                const sels = state.editor.getSelections?.() || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+                if (!sels || !sels.length) return;
+                const edits = sels.filter(Boolean).map((sel: any) => ({ range: sel, text, forceMoveMarkers: true }));
+                if (edits.length) {
+                  try { state.editor.executeEdits('java-bridge', edits); } catch {}
+                }
+              } catch {}
+            });
+          } catch {}
+
+          // Fallback: Intercept keydown at Monaco level to ensure WebView doesn't swallow clipboard shortcuts
+          try {
+            const KC = monaco.KeyCode;
+            const doCopy = () => {
+              const model = state.editor.getModel?.();
+              if (!model) return;
+              const sels0 = state.editor.getSelections?.() || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+              const selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+              if (!selections || !selections.length) return;
+              const texts: string[] = [];
+              for (const sel of selections) {
+                if (!sel) continue;
+                const isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
+                if (isEmpty) {
+                  const line = sel.startLineNumber;
+                  let t = model.getLineContent ? (model.getLineContent(line) || '') : '';
+                  t = t + '\n';
+                  texts.push(t);
+                } else {
+                  const t = model.getValueInRange(sel) || '';
+                  texts.push(t);
+                }
+              }
+              const clip = texts.join('\n');
+              try { (window as any).JavaBridge?.setClipboardText?.(clip); } catch {}
+            };
+            const doCut = () => {
+              const model = state.editor.getModel?.();
+              if (!model) return;
+              const sels0 = state.editor.getSelections?.() || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+              const selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+              if (!selections || !selections.length) return;
+              const texts: string[] = [];
+              const edits: any[] = [];
+              for (const sel of selections) {
+                if (!sel) continue;
+                const isEmpty = (sel.startLineNumber === sel.endLineNumber) && (sel.startColumn === sel.endColumn);
+                if (isEmpty) {
+                  const line = sel.startLineNumber;
+                  const lineText = model.getLineContent ? (model.getLineContent(line) || '') : '';
+                  texts.push(lineText + '\n');
+                  const lineCount = model.getLineCount ? model.getLineCount() : 0;
+                  if (line < lineCount) {
+                    edits.push({ range: { startLineNumber: line, startColumn: 1, endLineNumber: line + 1, endColumn: 1 }, text: '', forceMoveMarkers: true });
+                  } else {
+                    const maxCol = model.getLineMaxColumn ? model.getLineMaxColumn(line) : 1;
+                    edits.push({ range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: maxCol }, text: '', forceMoveMarkers: true });
+                  }
+                } else {
+                  const t = model.getValueInRange(sel) || '';
+                  texts.push(t);
+                  edits.push({ range: sel, text: '', forceMoveMarkers: true });
+                }
+              }
+              const clip = texts.join('\n');
+              try { (window as any).JavaBridge?.setClipboardText?.(clip); } catch {}
+              if (edits.length) {
+                try { state.editor.pushUndoStop && state.editor.pushUndoStop(); } catch {}
+                try { state.editor.executeEdits('java-bridge', edits); } catch {}
+                try { state.editor.pushUndoStop && state.editor.pushUndoStop(); } catch {}
+              }
+            };
+            const doPaste = () => {
+              const model = state.editor.getModel?.();
+              if (!model) return;
+              let text: string = '';
+              try { text = (window as any).JavaBridge?.getClipboardText?.() || ''; } catch {}
+              if (text == null) text = '';
+              const sels0 = state.editor.getSelections?.() || (state.editor.getSelection ? [state.editor.getSelection()] : []);
+              const selections = (sels0 && sels0.length) ? sels0 : (state.editor.getSelection ? [state.editor.getSelection()] : []);
+              if (!selections || !selections.length) return;
+              const edits = selections.filter(Boolean).map((sel: any) => ({ range: sel, text, forceMoveMarkers: true }));
+              if (edits.length) {
+                try { state.editor.pushUndoStop && state.editor.pushUndoStop(); } catch {}
+                try { state.editor.executeEdits('java-bridge', edits); } catch {}
+                try { state.editor.pushUndoStop && state.editor.pushUndoStop(); } catch {}
+              }
+            };
+            state.editor.onKeyDown((e: any) => {
+              const isCtrl = !!(e.ctrlKey || e.metaKey);
+              const isShift = !!e.shiftKey;
+              const code = e.keyCode;
+              const isCopy = (isCtrl && code === KC.KeyC) || (!isCtrl && !isShift && code === KC.F6 && false);
+              const isCut = (isCtrl && code === KC.KeyX);
+              const isPaste = (isCtrl && code === KC.KeyV) || (isShift && !isCtrl && code === KC.Insert);
+              const isCtrlInsertCopy = (isCtrl && !isShift && code === KC.Insert);
+              if (isCopy || isCtrlInsertCopy) {
+                doCopy(); e.preventDefault(); e.stopPropagation(); return;
+              }
+              if (isCut) { doCut(); e.preventDefault(); e.stopPropagation(); return; }
+              if (isPaste) { doPaste(); e.preventDefault(); e.stopPropagation(); return; }
+            });
+          } catch {}
+
         } else {
           state.editor.updateOptions({ theme });
           const model = state.editor.getModel();
           if (model) {
             monaco.editor.setModelLanguage(model, language);
             model.setValue(text || '');
+            // Reset dirty baseline when programmatically initializing
+            state.savedVersionId = model.getAlternativeVersionId();
+            if (state.dirty) {
+              state.dirty = false;
+              try { (window as any).JavaBridge?.onDirtyChanged(false); } catch {}
+            }
           }
+
+          // Keep external reference updated
+          try { (api as any).editor = state.editor; } catch {}
         }
       });
     },
@@ -119,7 +362,38 @@ interface MonacoBridgeApi {
     setText(text: string) {
       ensureReady(() => {
         const model = state.editor?.getModel?.();
-        if (model) model.setValue(text || '');
+        if (model) {
+          model.setValue(text || '');
+          // After programmatic set, reset the saved baseline and mark not dirty
+          try {
+            state.savedVersionId = model.getAlternativeVersionId();
+            if (state.dirty) {
+              state.dirty = false;
+              (window as any).JavaBridge?.onDirtyChanged(false);
+            }
+          } catch {}
+        }
+      });
+    },
+
+    getText(): string {
+      try {
+        const model = state.editor?.getModel?.();
+        if (model) return model.getValue() || '';
+        // fallback
+        return state.editor?.getValue ? (state.editor.getValue() || '') : '';
+      } catch {
+        return '';
+      }
+    },
+
+    setCursorPosition(offset: number) {
+      ensureReady(() => {
+        const model = state.editor?.getModel?.();
+        if (!model) return;
+        const pos = model.getPositionAt(Math.max(0, Math.floor(offset || 0)));
+        try { state.editor.setPosition(pos); } catch {}
+        try { state.editor.revealPositionInCenter(pos); } catch {}
       });
     },
 
