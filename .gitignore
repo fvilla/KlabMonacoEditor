@@ -40,4 +40,8 @@ build/
 
 ### Node
 /node_modules/
+/node/
 package-lock.json
+
+### mvn Wrapper ###
+.mvn/wrapper/maven-wrapper.jar
