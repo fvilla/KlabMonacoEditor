@@ -40,6 +40,8 @@ public class MarkerTest extends Application {
                 }
                 """;
 
+
+
         // Controls
         Label title = new Label("Monaco Editor - Marker Test");
         title.setStyle("-fx-font-size: 16px; -fx-font-weight: bold;");

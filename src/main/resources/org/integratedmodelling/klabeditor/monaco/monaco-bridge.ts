@@ -55,7 +55,8 @@ interface MonacoBridgeApi {
     showLineNumbers: boolean,
     pendingCalls: Array<() => void>,
     savedVersionId: number,
-    dirty: boolean
+    dirty: boolean,
+    _wheelNormalizerInstalled?: boolean
   } = {
     editor: null,
     container: null,
@@ -63,7 +64,8 @@ interface MonacoBridgeApi {
     showLineNumbers: true,
     pendingCalls: [],
     savedVersionId: 0,
-    dirty: false
+    dirty: false,
+    _wheelNormalizerInstalled: false
   };
 
   function flush() {
@@ -85,6 +87,50 @@ interface MonacoBridgeApi {
       case 'info':
       default: return monaco.MarkerSeverity.Info;
     }
+  }
+
+  /**
+   * JavaFX WebView can emit WheelEvents with deltaMode=PAGE for a mouse wheel.
+   * Monaco interprets that as page-wise scrolling. Normalize such events to
+   * line-wise scrolling by intercepting and applying a custom scrollTop delta.
+   */
+  function installWheelNormalizer() {
+    if (state._wheelNormalizerInstalled) return;
+    const ed: any = (state as any).editor;
+    if (!ed) return;
+    const node: HTMLElement | null = (ed.getDomNode ? ed.getDomNode() : null) || state.container;
+    if (!node) return;
+
+    const handler = (ev: WheelEvent) => {
+      try {
+        // Allow Ctrl+Wheel zoom behavior to pass through
+        if ((ev as any).ctrlKey) return;
+        const dm = (ev as any).deltaMode;
+        // 2 === DOM_DELTA_PAGE; intercept only that mode
+        if (dm === 2) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const sign = Math.sign((ev as any).deltaY || 0) || 0;
+          if (sign === 0) return;
+          // Use editor's line height if available
+          let lineHeight = 18;
+          try {
+            const opt = (monaco as any).editor?.EditorOption?.lineHeight;
+            if (opt != null && ed.getOption) {
+              const v = ed.getOption(opt);
+              if (typeof v === 'number' && v > 0) lineHeight = v;
+            }
+          } catch {}
+          const linesPerTick = 3; // feel-free constant; adjust as needed
+          const dy = sign * lineHeight * linesPerTick;
+          const cur = ed.getScrollTop ? ed.getScrollTop() : 0;
+          if (ed.setScrollTop) ed.setScrollTop(cur + dy);
+        }
+      } catch {}
+    };
+
+    try { node.addEventListener('wheel', handler, { passive: false }); } catch { try { node.addEventListener('wheel', handler as any, false); } catch {} }
+    state._wheelNormalizerInstalled = true;
   }
 
   // @ts-ignore
@@ -112,6 +158,10 @@ interface MonacoBridgeApi {
             theme: theme || 'vs-dark',
             automaticLayout: true,
             lineNumbers: state.showLineNumbers ? 'on' : 'off',
+            // Normalize scroll feel; JavaFX WebView may report wheel with deltaMode=PAGE
+            mouseWheelScrollSensitivity: 1,
+            fastScrollSensitivity: 1,
+            smoothScrolling: true,
           });
 
           // Expose editor directly (used by Java for certain hooks)
@@ -339,6 +389,11 @@ interface MonacoBridgeApi {
             });
           } catch {}
 
+          // Install wheel normalizer to convert PAGE-based wheel deltas into line-based scrolling
+          try {
+            installWheelNormalizer();
+          } catch {}
+
         } else {
           state.editor.updateOptions({ theme });
           const model = state.editor.getModel();
@@ -355,6 +410,9 @@ interface MonacoBridgeApi {
 
           // Keep external reference updated
           try { (api as any).editor = state.editor; } catch {}
+
+          // Ensure wheel normalizer is installed also when reusing the editor
+          try { installWheelNormalizer(); } catch {}
         }
       });
     },

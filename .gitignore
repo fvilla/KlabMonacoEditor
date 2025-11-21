@@ -45,3 +45,4 @@ package-lock.json
 
 ### mvn Wrapper ###
 .mvn/wrapper/maven-wrapper.jar
+/src/main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.js
