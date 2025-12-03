@@ -3,7 +3,7 @@ package org.integratedmodelling.klabeditor;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 
-public class HelloController {
+public class KlabEditorController {
     @FXML
     private Label welcomeText;
 
