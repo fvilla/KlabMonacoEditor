@@ -96,6 +96,17 @@
             <artifactId>javafx-graphics</artifactId>
             <version>21.0.1</version>
         </dependency>
+        <!-- For LSP integration -->
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j</artifactId>
+            <version>0.24.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j.jsonrpc</artifactId>
+            <version>0.24.0</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -118,15 +129,24 @@
                         <!-- Default configuration for running with: mvn clean javafx:run -->
                         <id>default-cli</id>
                         <configuration>
-                            <mainClass>
-                                org.integratedmodelling.klabeditor/org.integratedmodelling.klabeditor.HelloApplication
-                            </mainClass>
+                            <mainClass>org.integratedmodelling.klabeditor.KlabEditorApplication</mainClass>
                             <launcher>app</launcher>
                             <jlinkZipName>app</jlinkZipName>
                             <jlinkImageName>app</jlinkImageName>
                             <noManPages>true</noManPages>
                             <stripDebug>true</stripDebug>
                             <noHeaderFiles>true</noHeaderFiles>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!--  Debug configuration for running with: ./mvnw clean javafx:run@debug -->
+                        <id>debug</id>
+                        <configuration>
+                            <mainClass>org.integratedmodelling.klabeditor.KlabEditorApplication</mainClass>
+                            <options>
+                                <option>-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=0.0.0.0:9000
+                                </option>
+                            </options>
                         </configuration>
                     </execution>
                 </executions>

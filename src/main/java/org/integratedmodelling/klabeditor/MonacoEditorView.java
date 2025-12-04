@@ -64,6 +64,8 @@ public class MonacoEditorView extends StackPane {
     private String initialLanguage = "plaintext";
     private String initialTheme = "vs-dark";
 
+    private Consumer<String> changeListener;
+
     public MonacoEditorView() {
         this(null);
     }
@@ -268,16 +270,8 @@ public class MonacoEditorView extends StackPane {
         safeExec(js);
     }
 
-    /**
-     * Optional: ask the bridge to connect to a local LSP server (see comments in TS).
-     */
-    public void connectLsp(String wsUrl, String languageId) {
-        if (wsUrl == null || wsUrl.isBlank()) return;
-        String lang = languageId == null ? "" : languageId;
-        String js = "window.MonacoBridge && window.MonacoBridge.connectLsp && window.MonacoBridge" +
-                ".connectLsp(" + jsString(
-                wsUrl) + "," + jsString(lang) + ");";
-        safeExec(js);
+    public void setChangeListener(java.util.function.Consumer<String> listener) {
+        this.changeListener = listener;
     }
 
     // -------------- Java<->JS glue helpers --------------
@@ -344,6 +338,7 @@ public class MonacoEditorView extends StackPane {
      */
     @SuppressWarnings("unused")
     public class JavaBridge {
+
         public void onEditorReady() {
             // Currently we rely on JS to queue calls before ready; this is just a hook if needed.
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
@@ -387,6 +382,12 @@ public class MonacoEditorView extends StackPane {
                 }
                 return "";
             });
+        }
+
+        public void onContentChanged(String text) {
+            if (changeListener != null) {
+                changeListener.accept(text);
+            }
         }
     }
 

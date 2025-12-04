@@ -185,6 +185,13 @@ interface MonacoBridgeApi {
             });
           }
 
+          // send modifications to Java
+          state.editor.onDidChangeModelContent(function (e) {
+              if ((window as any).JavaBridge && typeof (window as any).JavaBridge?.onContentChanged === 'function') {
+                  (window as any).JavaBridge?.onContentChanged(state.editor.getValue());
+              }
+          });
+
           // Install save keybinding (Ctrl/Cmd + S)
           try {
             state.editor.addCommand((monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS), () => {
