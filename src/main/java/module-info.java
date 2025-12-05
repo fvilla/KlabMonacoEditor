@@ -6,8 +6,11 @@ module org.integratedmodelling.klabeditor {
 
     requires org.kordamp.ikonli.javafx;
     requires javafx.graphics;
-    requires java.desktop;
     requires jdk.httpserver;
+    requires org.integratedmodelling.languages.kim.ide;
+    requires org.integratedmodelling.languages.kim.ide.org.eclipse.lsp4j;
+    requires com.fasterxml.jackson.databind;
+    requires java.desktop;
 
     opens org.integratedmodelling.klabeditor to javafx.fxml;
     exports org.integratedmodelling.klabeditor;

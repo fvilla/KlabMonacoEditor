@@ -1,21 +1,25 @@
 package org.integratedmodelling.klabeditor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
 import javafx.scene.Node;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyEvent;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
-import javafx.scene.web.WebView;
 import netscape.javascript.JSObject;
+import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.DiagnosticSeverity;
+import org.eclipse.lsp4j.Range;
 
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -65,12 +69,14 @@ public class MonacoEditorView extends StackPane {
     private String initialTheme = "vs-dark";
 
     private Consumer<String> changeListener;
+    private final String documentUri;
 
     public MonacoEditorView() {
-        this(null);
+        this(null,null);
     }
 
-    public MonacoEditorView(Consumer<String> saveCallback) {
+    public MonacoEditorView(String documentUri, Consumer<String> saveCallback) {
+        this.documentUri = documentUri;
         getChildren().add(webView);
         setPrefSize(800, 600);
 
@@ -99,6 +105,53 @@ public class MonacoEditorView extends StackPane {
                 webEngine.load(url.toExternalForm());
             }
         }
+
+
+    }
+
+    public String getDocumentUri() {
+        return documentUri;
+    }
+
+    public void setDiagnostics(List<Diagnostic> diagnostics) {
+        System.out.println("[MonacoEditorView] setDiagnostics called, count = " + diagnostics.size());
+
+        try {
+            String json = new ObjectMapper().writeValueAsString(
+                    diagnostics.stream().map(this::toMarker).toList()
+            );
+
+            System.out.println("[MonacoEditorView] Sending to JS: " + json);
+
+            webView.getEngine().executeScript("window.kim_setDiagnostics(" + json + ");");
+
+            System.out.println("[MonacoEditorView] JS execution completed");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private Map<String, Object> toMarker(Diagnostic d) {
+        Range r = d.getRange();
+        Map<String, Object> m = new HashMap<>();
+        m.put("startLineNumber", r.getStart().getLine() + 1);
+        m.put("startColumn",     r.getStart().getCharacter() + 1);
+        m.put("endLineNumber",   r.getEnd().getLine() + 1);
+        m.put("endColumn",       r.getEnd().getCharacter() + 1);
+        m.put("message",         d.getMessage());
+        m.put("severity",        mapSeverity(d.getSeverity()));
+        m.put("source",          d.getSource());
+        return m;
+    }
+
+    private int mapSeverity(DiagnosticSeverity severity) {
+        if (severity == null) return 1;
+        return switch (severity) {
+            case Error -> 8;
+            case Warning -> 4;
+            case Information -> 2;
+            case Hint -> 1;
+        };
     }
 
     private ChangeListener<Worker.State> pageLoadListener() {
@@ -113,8 +166,54 @@ public class MonacoEditorView extends StackPane {
 
                 // If we had initial text requested before page loaded, initialize now
                 Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
+                installJsConsoleBridge();
             }
         };
+    }
+
+    private void installJsConsoleBridge() {
+        String script = """
+        (function() {
+          if (!window.JavaBridge) { return; }
+          try {
+            var oldLog = console.log;
+            var oldWarn = console.warn;
+            var oldError = console.error;
+
+            function send(kind, args) {
+              try {
+                var msg = Array.prototype.map.call(args, function(a) {
+                  try { return String(a); } catch(e) { return "[object]"; }
+                }).join(" ");
+                window.JavaBridge.logFromJs("[" + kind + "] " + msg);
+              } catch(e) {
+                // ignore
+              }
+            }
+
+            console.log = function() {
+              if (oldLog) oldLog.apply(console, arguments);
+              send("LOG", arguments);
+            };
+            console.warn = function() {
+              if (oldWarn) oldWarn.apply(console, arguments);
+              send("WARN", arguments);
+            };
+            console.error = function() {
+              if (oldError) oldError.apply(console, arguments);
+              send("ERROR", arguments);
+            };
+          } catch (e) {
+            // swallow
+          }
+        })();
+        """;
+
+        try {
+            webEngine.executeScript(script);
+        } catch (Throwable t) {
+            System.err.println("[MonacoEditorView] Failed to install JS console bridge: " + t.getMessage());
+        }
     }
 
     /**
@@ -385,9 +484,17 @@ public class MonacoEditorView extends StackPane {
         }
 
         public void onContentChanged(String text) {
+            System.out.println("[JavaBridge] onContentChanged, length=" + (text != null ? text.length() : 0));
             if (changeListener != null) {
                 changeListener.accept(text);
+            } else {
+                System.out.println("[JavaBridge] changeListener is null");
             }
+        }
+
+        // -------- JS console bridge --------
+        public void logFromJs(String msg) {
+            System.out.println("[JS Console] " + msg);
         }
     }
 

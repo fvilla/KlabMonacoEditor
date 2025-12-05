@@ -163,9 +163,27 @@ interface MonacoBridgeApi {
             fastScrollSensitivity: 1,
             smoothScrolling: true,
           });
-
           // Expose editor directly (used by Java for certain hooks)
           try { (api as any).editor = state.editor; } catch {}
+
+          (window as any).kim_setDiagnostics = function (markers: any[]) {
+            console.log("[JS] kim_setDiagnostics called with markers:", markers);
+
+            const editor = state.editor;
+            if (!editor) {
+              console.warn("[JS] kim_setDiagnostics: editor not ready");
+              return;
+            }
+
+            const model = editor.getModel?.();
+            if (!model) {
+              console.warn("[JS] kim_setDiagnostics: no model");
+              return;
+            }
+
+            monaco.editor.setModelMarkers(model, "kim-lsp", markers || []);
+            console.log("[JS] markers applied");
+          };
 
           const model = state.editor.getModel();
           if (model) {
