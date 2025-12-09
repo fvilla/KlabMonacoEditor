@@ -48,7 +48,7 @@ interface MonacoBridgeApi {
 }
 
 (function () {
-  const state: {
+    const state: {
     editor: any | null,
     container: HTMLElement | null,
     ready: boolean,
@@ -57,7 +57,7 @@ interface MonacoBridgeApi {
     savedVersionId: number,
     dirty: boolean,
     _wheelNormalizerInstalled?: boolean
-  } = {
+    } = {
     editor: null,
     container: null,
     ready: false,
@@ -66,7 +66,104 @@ interface MonacoBridgeApi {
     savedVersionId: 0,
     dirty: false,
     _wheelNormalizerInstalled: false
-  };
+    };
+
+    function registerKimLanguage() {
+      // Avoid double-registration in case the script is loaded twice
+      try {
+        const existing = (monaco as any).languages.getLanguages()
+          .some((l: any) => l.id === 'kim');
+        if (existing) {
+          return;
+        }
+      } catch (e) {
+        console.warn('Unable to inspect languages, registering kim anyway:', e);
+      }
+
+      monaco.languages.register({
+        id: 'kim',
+        aliases: ['k.IM', 'kim'],
+        extensions: ['.kim']
+      });
+
+      // Very simple Monarch definition – tweak keywords / rules as you like
+      monaco.languages.setMonarchTokensProvider('kim', {
+        defaultToken: '',
+        tokenPostfix: '.kim',
+
+        keywords: [
+          'model', 'context', 'state', 'event', 'observation', 'end',
+          'import', 'as', 'when', 'where', 'with', 'from'
+        ],
+
+        operators: [
+          '=', '>', '<', '==', '!=', '>=', '<=', '&&', '||', '+', '-', '*', '/', '!'
+        ],
+
+        // regexps
+        symbols: /[=><!~?:&|+\-*\/\^%]+/,
+
+        tokenizer: {
+          root: [
+            // comments
+            [/#.*$/, 'comment'],
+            [/\/\/.*$/, 'comment'],
+
+            // strings
+            [/"([^"\\]|\\.)*"/, 'string'],
+            [/'([^'\\]|\\.)*'/, 'string'],
+
+            // numbers
+            [/\d+(\.\d+)?/, 'number'],
+
+            // identifiers & keywords
+            [/[a-zA-Z_][\w]*/, {
+              cases: {
+                '@keywords': 'keyword',
+                '@default': 'identifier'
+              }
+            }],
+
+            // operators
+            [/@symbols/, {
+              cases: {
+                '@operators': 'operator',
+                '@default': ''
+              }
+            }],
+
+            // delimiters / brackets
+            [/[{}()[\]]/, '@brackets'],
+            [/[;,]/, 'delimiter']
+          ]
+        }
+      });
+
+      monaco.languages.setLanguageConfiguration('kim', {
+        comments: {
+          lineComment: '#'
+        },
+        brackets: [
+          ['{', '}'],
+          ['[', ']'],
+          ['(', ')']
+        ],
+        autoClosingPairs: [
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: '\'', close: '\'' }
+        ],
+        surroundingPairs: [
+          { open: '{', close: '}' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '"', close: '"' },
+          { open: '\'', close: '\'' }
+        ]
+      });
+    }
 
   function flush() {
     while (state.pendingCalls.length) {
@@ -138,6 +235,12 @@ interface MonacoBridgeApi {
 //    editor: null,
     _onAmdReady(container: HTMLElement) {
       state.container = container;
+       // Register our custom KIM language once Monaco is loaded
+            try {
+              registerKimLanguage();
+            } catch (e) {
+              console.error('Failed to register KIM language:', e);
+            }
       // Do nothing else here; init() will create the editor. Mark as soft-ready so queued init runs.
       state.ready = true;
       flush();
