@@ -62,6 +62,7 @@ public class MonacoEditorView extends StackPane {
     private Consumer<String> onSaveListener;
     private Consumer<Boolean> onDirtyChangedListener;
     private volatile boolean isDirty;
+    private volatile String pendingDiagnosticsJson = null;
 
     // Memorize last requested init so we can re-apply if needed
     private String initialText = "";
@@ -114,22 +115,21 @@ public class MonacoEditorView extends StackPane {
     }
 
     public void setDiagnostics(List<Diagnostic> diagnostics) {
-        System.out.println("[MonacoEditorView] setDiagnostics called, count = " + diagnostics.size());
+        System.out.println("[MonacoEditorView] setDiagnostics count=" + diagnostics.size());
 
         try {
-            String json = new ObjectMapper().writeValueAsString(
-                    diagnostics.stream().map(this::toMarker).toList()
-            );
+            String json = new ObjectMapper().writeValueAsString(diagnostics.stream().map(this::toMarker).toList());
+            // Cache last diagnostics so we can replay after load/ready
+            pendingDiagnosticsJson = json;
+            // Try immediately (will be skipped if not loaded yet)
+            safeExec("window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + json + ");");
 
-            System.out.println("[MonacoEditorView] Sending to JS: " + json);
-
-            webView.getEngine().executeScript("window.kim_setDiagnostics(" + json + ");");
-
-            System.out.println("[MonacoEditorView] JS execution completed");
         } catch (Exception e) {
+            System.err.println("[MonacoEditorView] Failed to send diagnostics to JS");
             e.printStackTrace();
         }
     }
+
 
     private Map<String, Object> toMarker(Diagnostic d) {
         Range r = d.getRange();
@@ -249,11 +249,28 @@ public class MonacoEditorView extends StackPane {
     }
 
     private void initEditor(String text, String language, String theme) {
-        String js = "window.MonacoBridge && window.MonacoBridge.init(" + jsString(text) + "," + jsString(
-                language) + "," + jsString(theme) + ");";
+        String uri = (documentUri != null && !documentUri.isBlank())
+                ? documentUri
+                : "inmemory:///untitled.kim";
+
+        System.out.println(
+                "[MonacoEditorView] initEditor uri=" + uri +
+                        " language=" + language +
+                        " theme=" + theme
+        );
+
+        String js = "window.MonacoBridge && window.MonacoBridge.openDocument({"
+                + "uri:" + jsString(uri) + ","
+                + "language:" + jsString(language) + ","
+                + "theme:" + jsString(theme) + ","
+                + "text:" + jsString(text)
+                + "});";
+
         safeExec(js);
-        installCursorPositionHooks();
     }
+
+
+
 
     /**
      * Set entire editor text.
@@ -376,15 +393,25 @@ public class MonacoEditorView extends StackPane {
     // -------------- Java<->JS glue helpers --------------
 
     private void safeExec(String script) {
-        if (!pageLoaded.get()) return; // queueing is handled JS-side in the bridge
+        if (!pageLoaded.get()) {
+            System.out.println(
+                    "[MonacoEditorView] JS exec skipped (page not loaded)"
+            );
+            return;
+        }
+
         Platform.runLater(() -> {
             try {
                 webEngine.executeScript(script);
             } catch (Throwable t) {
-                System.err.println("[MonacoEditorView] JS exec failed: " + t.getMessage());
+                System.err.println(
+                        "[MonacoEditorView] JS exec failed: " + script
+                );
+                t.printStackTrace();
             }
         });
     }
+
 
     private Object safeEval(String script) {
         if (!pageLoaded.get()) return null;
@@ -441,6 +468,10 @@ public class MonacoEditorView extends StackPane {
         public void onEditorReady() {
             // Currently we rely on JS to queue calls before ready; this is just a hook if needed.
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
+            if (pendingDiagnosticsJson != null) {
+                System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
+                safeExec("window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
+            }
         }
 
         public void onCursorPositionChanged(int offset) {

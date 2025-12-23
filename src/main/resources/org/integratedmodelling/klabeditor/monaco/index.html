@@ -44,6 +44,7 @@
       if (window.MonacoBridge && window.MonacoBridge._onAmdReady) {
         const container = document.getElementById('container');
         window.MonacoBridge._onAmdReady(container);
+        try { window.JavaBridge?.onEditorReady?.(); } catch {}
         // If running outside JavaFX (no window.JavaBridge), auto-initialize so the page renders.
         if (!(window.JavaBridge)) {
           try {
@@ -55,11 +56,23 @@
             if (text.length > 200000) {
               text = text.substring(0, 200000) + "\n... [truncated]";
             }
-            window.MonacoBridge.init(text, language, theme);
+            window.MonacoBridge.openDocument({
+              uri: "inmemory:///debug.kim",
+              language,
+              theme,
+              text
+            });
+
           } catch (e) {
             console.error('Auto-bootstrap failed:', e);
             // Fallback minimal editor so the page is not blank
-            try { window.MonacoBridge.init('', 'plaintext', 'vs-dark'); } catch {}
+            try { window.MonacoBridge.openDocument({
+                uri: "inmemory:///debug.kim",
+                language: "plaintext",
+                theme: "vs-dark",
+                text: ""
+              });
+            } catch { console.error('Fallback-bootstrap failed:', e); }
           }
         }
       }
