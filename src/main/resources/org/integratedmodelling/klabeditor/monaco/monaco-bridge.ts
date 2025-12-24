@@ -81,6 +81,7 @@ function isCopyCutPaste(e: any) {
     pendingCalls: Array<() => void>,
     savedVersionId: number,
     dirty: boolean,
+    _contentDisposable?: any,
     _wheelNormalizerInstalled?: boolean,
     _currentUri?: any | null
   } = {
@@ -91,6 +92,7 @@ function isCopyCutPaste(e: any) {
     pendingCalls: [],
     savedVersionId: 0,
     dirty: false,
+    _contentDisposable: null as any,
     _wheelNormalizerInstalled: false,
     _currentUri: null
   };
@@ -104,6 +106,29 @@ function isCopyCutPaste(e: any) {
   function ensureReady(f: () => void) {
     if (state.ready) f(); else state.pendingCalls.push(f);
   }
+
+  function attachContentChanged(model: any) {
+    try {
+      if (state._contentDisposable?.dispose) {
+        state._contentDisposable.dispose();
+      }
+    } catch {}
+
+    try {
+      state._contentDisposable = model.onDidChangeContent(() => {
+        try {
+          const val = model.getValue?.() || '';
+          (window as any).JavaBridge?.onContentChanged?.(val);
+        } catch (e) {
+          console.error("[MonacoBridge] onContentChanged failed", e);
+        }
+      });
+      logInfo("Bound onContentChanged to active model");
+    } catch (e) {
+      logError("Failed binding onDidChangeContent", e);
+    }
+  }
+
 
   function toSeverity(s?: string) {
     const m = (s || 'info').toLowerCase();
@@ -247,14 +272,14 @@ function isCopyCutPaste(e: any) {
     } catch { }
 
     // Content changes -> Java
-    try {
-      state.editor.onDidChangeModelContent(() => {
-        try {
-          const val = state.editor.getValue ? state.editor.getValue() : (state.editor.getModel?.()?.getValue?.() || '');
-          (window as any).JavaBridge?.onContentChanged?.(val);
-        } catch { }
-      });
-    } catch { }
+//     try {
+//       state.editor.onDidChangeModelContent(() => {
+//         try {
+//           const val = state.editor.getValue ? state.editor.getValue() : (state.editor.getModel?.()?.getValue?.() || '');
+//           (window as any).JavaBridge?.onContentChanged?.(val);
+//         } catch { }
+//       });
+//     } catch { }
 
     // Save keybinding
     try {
@@ -522,6 +547,7 @@ function isCopyCutPaste(e: any) {
           }
 
           state.editor.setModel(model);
+          attachContentChanged(model);
 
           try {
             monaco.editor.setTheme(theme);
