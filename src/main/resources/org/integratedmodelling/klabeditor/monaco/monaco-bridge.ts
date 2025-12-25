@@ -145,19 +145,19 @@ function isCopyCutPaste(e: any) {
     // Avoid double-registration
     try {
       const existing = (monaco as any).languages.getLanguages()
-        .some((l: any) => l.id === 'kim');
+        .some((l: any) => l.id === 'org.integratedmodelling.languages.Kim');
       if (existing) return;
     } catch (e) {
       console.warn('Unable to inspect languages, registering kim anyway:', e);
     }
 
     monaco.languages.register({
-      id: 'kim',
+      id: 'org.integratedmodelling.languages.Kim',
       aliases: ['k.IM', 'kim'],
       extensions: ['.kim']
     });
 
-    monaco.languages.setMonarchTokensProvider('kim', {
+    monaco.languages.setMonarchTokensProvider('org.integratedmodelling.languages.Kim', {
       defaultToken: '',
       tokenPostfix: '.kim',
       keywords: ['model', 'context', 'state', 'event', 'observation', 'end', 'import', 'as', 'when', 'where', 'with', 'from'],
@@ -178,7 +178,7 @@ function isCopyCutPaste(e: any) {
       }
     });
 
-    monaco.languages.setLanguageConfiguration('kim', {
+    monaco.languages.setLanguageConfiguration('org.integratedmodelling.languages.Kim', {
       comments: { lineComment: '#' },
       brackets: [['{', '}'], ['[', ']'], ['(', ')']],
       autoClosingPairs: [
