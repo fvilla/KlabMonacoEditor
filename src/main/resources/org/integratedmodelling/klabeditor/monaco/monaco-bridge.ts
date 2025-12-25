@@ -198,6 +198,67 @@ function isCopyCutPaste(e: any) {
     });
   }
 
+  /// Worldview language registration
+
+
+  function registerWorldviewLanguage() {
+    // Avoid double-registration
+    try {
+      const existing = (monaco as any).languages.getLanguages()
+          .some((l: any) => l.id === 'org.integratedmodelling.languages.Worldview');
+      if (existing) return;
+    } catch (e) {
+      console.warn('Unable to inspect languages, registering kwv anyway:', e);
+    }
+
+    monaco.languages.register({
+      id: 'org.integratedmodelling.languages.Worldview',
+      aliases: ['k.Worldview', 'kwv'],
+      extensions: ['.kwv']
+    });
+
+    monaco.languages.setMonarchTokensProvider('org.integratedmodelling.languages.Worldview', {
+      defaultToken: '',
+      tokenPostfix: '.kim',
+      keywords: ['abstract', 'thing', 'identity', 'attribute', 'as', 'when', 'where', 'with', 'from'],
+      operators: ['=', '>', '<', '==', '!=', '>=', '<=', '&&', '||', '+', '-', '*', '/', '!'],
+      symbols: /[=><!~?:&|+\-*\/\^%]+/,
+      tokenizer: {
+        root: [
+          [/#.*$/, 'comment'],
+          [/\/\/.*$/, 'comment'],
+          [/"([^"\\]|\\.)*"/, 'string'],
+          [/'([^'\\]|\\.)*'/, 'string'],
+          [/\d+(\.\d+)?/, 'number'],
+          [/[a-zA-Z_][\w]*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
+          [/@symbols/, { cases: { '@operators': 'operator', '@default': '' } }],
+          [/[{}()[\]]/, '@brackets'],
+          [/[;,]/, 'delimiter']
+        ]
+      }
+    });
+
+    monaco.languages.setLanguageConfiguration('org.integratedmodelling.languages.Worldview', {
+      comments: { lineComment: '#' },
+      brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+      autoClosingPairs: [
+        { open: '{', close: '}' },
+        { open: '[', close: ']' },
+        { open: '(', close: ')' },
+        { open: '"', close: '"' },
+        { open: '\'', close: '\'' }
+      ],
+      surroundingPairs: [
+        { open: '{', close: '}' },
+        { open: '[', close: ']' },
+        { open: '(', close: ')' },
+        { open: '"', close: '"' },
+        { open: '\'', close: '\'' }
+      ]
+    });
+  }
+  ///
+
   function installWheelNormalizer() {
     if (state._wheelNormalizerInstalled) return;
     const ed: any = state.editor;
@@ -495,11 +556,20 @@ function isCopyCutPaste(e: any) {
     _onAmdReady(container: HTMLElement) {
       state.container = container;
 
+      // FIXME only the relevant language should be registered (?)
       try {
         registerKimLanguage();
         logInfo("AMD ready, KIM language registered");
       } catch (e) {
         logError("Failed to register KIM language", e);
+      }
+
+      // Add this too for now. Seems like it only wants one
+      try {
+        registerWorldviewLanguage();
+        logInfo("AMD ready, Worldview language registered");
+      } catch (e) {
+        logError("Failed to register Worldview language", e);
       }
 
       state.ready = true;
