@@ -300,7 +300,7 @@ function isCopyCutPaste(e: any) {
   //   state._wheelNormalizerInstalled = true;
   // }
 
-  function ensureEditorCreated(theme: string) {
+  function ensureEditorCreated(theme: string, language: string) {
     if (!state.container) {
       console.error('Monaco container not available');
       return;
@@ -309,7 +309,7 @@ function isCopyCutPaste(e: any) {
 
     state.editor = monaco.editor.create(state.container, {
       value: '',
-      language: 'plaintext',
+      language: language || 'plaintext',
       theme: theme || 'vs-dark',
       automaticLayout: true,
       lineNumbers: state.showLineNumbers ? 'on' : 'off',
@@ -597,7 +597,7 @@ function isCopyCutPaste(e: any) {
           const language = doc.language || 'plaintext';
           const theme = doc.theme || 'vs-dark';
 
-          ensureEditorCreated(theme);
+          ensureEditorCreated(theme, language);
 
           if (!state.editor) {
             logError("Editor creation failed", null);
