@@ -72,6 +72,8 @@ public class MonacoEditorView extends StackPane {
     private Consumer<String> changeListener;
     private final String documentUri;
 
+    private final JavaBridge javaBridge = new JavaBridge();
+
     public MonacoEditorView() {
         this(null,null);
     }
@@ -162,7 +164,7 @@ public class MonacoEditorView extends StackPane {
 
                 // Provide a Java connector object callable from JS: window.JavaBridge
                 JSObject win = window;
-                win.setMember("JavaBridge", new JavaBridge());
+                win.setMember("JavaBridge", javaBridge);
                 installJsConsoleBridge();
                 // If we had initial text requested before page loaded, initialize now
                 Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
