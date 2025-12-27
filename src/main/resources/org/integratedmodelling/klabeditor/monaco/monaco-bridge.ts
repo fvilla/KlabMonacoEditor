@@ -572,10 +572,8 @@ function isCopyCutPaste(e: any) {
       } catch (e) {
         logError("Failed to register Worldview language", e);
       }
-
-      state.ready = true;
       flush();
-
+      state.ready = true;
       try {
         (window as any).JavaBridge?.onEditorReady?.();
         logInfo("JavaBridge.onEditorReady() called (AMD ready)");

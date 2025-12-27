@@ -163,10 +163,9 @@ public class MonacoEditorView extends StackPane {
                 // Provide a Java connector object callable from JS: window.JavaBridge
                 JSObject win = window;
                 win.setMember("JavaBridge", new JavaBridge());
-
+                installJsConsoleBridge();
                 // If we had initial text requested before page loaded, initialize now
                 Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
-                installJsConsoleBridge();
             }
         };
     }
@@ -517,7 +516,8 @@ public class MonacoEditorView extends StackPane {
         public void onContentChanged(String text) {
             System.out.println("[JavaBridge] onContentChanged, length=" + (text != null ? text.length() : 0));
             if (changeListener != null) {
-                changeListener.accept(text);
+                final String safe = (text == null ? "" : text);
+                Platform.runLater(() -> changeListener.accept(safe));
             } else {
                 System.out.println("[JavaBridge] changeListener is null");
             }
