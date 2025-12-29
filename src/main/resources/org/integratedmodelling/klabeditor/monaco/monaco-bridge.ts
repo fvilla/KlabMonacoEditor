@@ -160,16 +160,18 @@ function isCopyCutPaste(e: any) {
     monaco.languages.setMonarchTokensProvider('org.integratedmodelling.languages.Kim', {
       defaultToken: '',
       tokenPostfix: '.kim',
-      keywords: ['model', 'context', 'state', 'event', 'observation', 'end', 'import', 'as', 'when', 'where', 'with', 'from'],
+      keywords: ['model', 'define', 'import', 'observing', 'using', 'as', 'private', 'namespace', 'when', 'where', 'with', 'from'],
       operators: ['=', '>', '<', '==', '!=', '>=', '<=', '&&', '||', '+', '-', '*', '/', '!'],
       symbols: /[=><!~?:&|+\-*\/\^%]+/,
       tokenizer: {
         root: [
-          [/#.*$/, 'comment'],
+          // [/(?s)/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*\\*/, 'comment'],
+          // [/\/\*.*\*\//, 'comment'],
           [/\/\/.*$/, 'comment'],
           [/"([^"\\]|\\.)*"/, 'string'],
           [/'([^'\\]|\\.)*'/, 'string'],
           [/\d+(\.\d+)?/, 'number'],
+          [/@\s*[a-zA-Z_\$][\w\$]*/, 'annotation'],
           [/[a-zA-Z_][\w]*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
           [/@symbols/, { cases: { '@operators': 'operator', '@default': '' } }],
           [/[{}()[\]]/, '@brackets'],
@@ -179,9 +181,10 @@ function isCopyCutPaste(e: any) {
     });
 
     monaco.languages.setLanguageConfiguration('org.integratedmodelling.languages.Kim', {
-      comments: { lineComment: '#' },
-      brackets: [['{', '}'], ['[', ']'], ['(', ')']],
+      comments: { lineComment: '//', blockComment: ['/*', '*/'] },
+      brackets: [['{', '}'], ['[', ']'], ['(', ')'], ['{{', '}}']],
       autoClosingPairs: [
+        { open: '{{', close: '}}' },
         { open: '{', close: '}' },
         { open: '[', close: ']' },
         { open: '(', close: ')' },
@@ -189,6 +192,7 @@ function isCopyCutPaste(e: any) {
         { open: '\'', close: '\'' }
       ],
       surroundingPairs: [
+        { open: '{{', close: '}}' },
         { open: '{', close: '}' },
         { open: '[', close: ']' },
         { open: '(', close: ')' },
@@ -225,7 +229,7 @@ function isCopyCutPaste(e: any) {
       symbols: /[=><!~?:&|+\-*\/\^%]+/,
       tokenizer: {
         root: [
-          [/#.*$/, 'comment'],
+          // [/#.*$/, 'comment'],
           [/\/\/.*$/, 'comment'],
           [/"([^"\\]|\\.)*"/, 'string'],
           [/'([^'\\]|\\.)*'/, 'string'],
