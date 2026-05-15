@@ -89,7 +89,7 @@ function isCopyCutPaste(e: any) {
 
   const KLAB_LANGUAGES: KlabLanguageSpec[] = [
     { name: "kim", id: "org.integratedmodelling.languages.Kim", aliases: ["k.IM", "kim"], extensions: [".kim"] },
-    { name: "kactor", id: "org.integratedmodelling.languages.Kactor", aliases: ["k.Actors", "kactor"], extensions: [".kactor"] },
+    { name: "kactor", id: "org.integratedmodelling.languages.KActors", aliases: ["k.Actors", "kactor"], extensions: [".kactor"] },
     { name: "worldview", id: "org.integratedmodelling.languages.Worldview", aliases: ["k.Worldview", "worldview", "kwv"], extensions: [".kwv"] },
     { name: "observation", id: "org.integratedmodelling.languages.Observation", aliases: ["k.Observation", "observation"], extensions: [".obs", ".observation"] }
   ];
