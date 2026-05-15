@@ -7,11 +7,11 @@ import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
 import javafx.scene.Node;
-import javafx.util.Duration;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
+import javafx.util.Duration;
 import netscape.javascript.JSObject;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
@@ -93,7 +93,7 @@ public class MonacoEditorView extends StackPane {
     private final JavaBridge javaBridge = new JavaBridge();
 
     public MonacoEditorView() {
-        this(null,null);
+        this(null, null);
     }
 
     public MonacoEditorView(int highlighterServicePort) {
@@ -126,7 +126,8 @@ public class MonacoEditorView extends StackPane {
                     "ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
             webEngine.loadContent("<html><body><pre>" + escapeHtml(msg) + "</pre></body></html>");
         } else {
-            // In debug mode we prefer to open the external browser with query parameters when loadEditor() is called.
+            // In debug mode we prefer to open the external browser with query parameters when loadEditor()
+            // is called.
             if (!webView.isDebug()) {
                 webEngine.load(url.toExternalForm());
             }
@@ -152,8 +153,8 @@ public class MonacoEditorView extends StackPane {
         } else {
             this.highlighterServiceUrl = highlighterServiceUrl.replaceAll("/+$", "");
         }
-        safeExec("window.MonacoBridge && window.MonacoBridge.configureHighlighter("
-                + jsString(this.highlighterServiceUrl) + ");");
+        safeExec("window.MonacoBridge && window.MonacoBridge.configureHighlighter(" + jsString(
+                this.highlighterServiceUrl) + ");");
     }
 
     public String getHighlighterServiceUrl() {
@@ -166,7 +167,9 @@ public class MonacoEditorView extends StackPane {
         }
         try {
             String json = new ObjectMapper().writeValueAsString(conceptCategories);
-            safeExec("window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json + ");");
+            safeExec(
+                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json +
+                            ");");
         } catch (Exception e) {
             System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
             e.printStackTrace();
@@ -179,7 +182,9 @@ public class MonacoEditorView extends StackPane {
         }
         try {
             String json = new ObjectMapper().writeValueAsString(concepts);
-            safeExec("window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json + ");");
+            safeExec(
+                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json +
+                            ");");
         } catch (Exception e) {
             System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
             e.printStackTrace();
@@ -190,7 +195,8 @@ public class MonacoEditorView extends StackPane {
         System.out.println("[MonacoEditorView] setDiagnostics count=" + diagnostics.size());
 
         try {
-            String json = new ObjectMapper().writeValueAsString(diagnostics.stream().map(this::toMarker).toList());
+            String json = new ObjectMapper().writeValueAsString(
+                    diagnostics.stream().map(this::toMarker).toList());
             // Cache last diagnostics so we can replay after load/ready
             pendingDiagnosticsJson = json;
             // Try immediately (will be skipped if not loaded yet)
@@ -207,12 +213,12 @@ public class MonacoEditorView extends StackPane {
         Range r = d.getRange();
         Map<String, Object> m = new HashMap<>();
         m.put("startLineNumber", r.getStart().getLine() + 1);
-        m.put("startColumn",     r.getStart().getCharacter() + 1);
-        m.put("endLineNumber",   r.getEnd().getLine() + 1);
-        m.put("endColumn",       r.getEnd().getCharacter() + 1);
-        m.put("message",         d.getMessage());
-        m.put("severity",        mapSeverity(d.getSeverity()));
-        m.put("source",          d.getSource());
+        m.put("startColumn", r.getStart().getCharacter() + 1);
+        m.put("endLineNumber", r.getEnd().getLine() + 1);
+        m.put("endColumn", r.getEnd().getCharacter() + 1);
+        m.put("message", d.getMessage());
+        m.put("severity", mapSeverity(d.getSeverity()));
+        m.put("source", d.getSource());
         return m;
     }
 
@@ -247,12 +253,13 @@ public class MonacoEditorView extends StackPane {
     private void notifyBridgeIfAlreadyReady() {
         try {
             webEngine.executeScript("""
-                    window.MonacoBridge
-                    && window.MonacoBridge._notifyJavaReady
-                    && window.MonacoBridge._notifyJavaReady();
-                    """);
+                                            window.MonacoBridge
+                                            && window.MonacoBridge._notifyJavaReady
+                                            && window.MonacoBridge._notifyJavaReady();
+                                            """);
         } catch (Throwable t) {
-            System.err.println("[MonacoEditorView] Failed to request JS ready notification: " + t.getMessage());
+            System.err.println(
+                    "[MonacoEditorView] Failed to request JS ready notification: " + t.getMessage());
         }
     }
 
@@ -269,8 +276,7 @@ public class MonacoEditorView extends StackPane {
             readinessWatchdog.stop();
         }
         readinessWatchdog = new Timeline(
-                new KeyFrame(Duration.seconds(READINESS_TIMEOUT_SECONDS), e -> onWatchdogFired())
-        );
+                new KeyFrame(Duration.seconds(READINESS_TIMEOUT_SECONDS), e -> onWatchdogFired()));
         readinessWatchdog.setCycleCount(1);
         readinessWatchdog.play();
     }
@@ -280,14 +286,14 @@ public class MonacoEditorView extends StackPane {
             return; // Fired just after JS confirmed ready; nothing to do
         }
         if (loadRetryCount >= MAX_LOAD_RETRIES) {
-            System.err.println("[MonacoEditorView] Monaco editor did not become ready after "
-                    + MAX_LOAD_RETRIES + " retries — giving up.");
+            System.err.println(
+                    "[MonacoEditorView] Monaco editor did not become ready after " + MAX_LOAD_RETRIES + " " +
+                            "retries — giving up.");
             return;
         }
         loadRetryCount++;
-        System.out.println("[MonacoEditorView] Editor JS bridge not ready within "
-                + (int) READINESS_TIMEOUT_SECONDS + "s — reloading page "
-                + "(attempt " + loadRetryCount + "/" + MAX_LOAD_RETRIES + ")");
+        System.out.println(
+                "[MonacoEditorView] Editor JS bridge not ready within " + (int) READINESS_TIMEOUT_SECONDS + "s — reloading page " + "(attempt " + loadRetryCount + "/" + MAX_LOAD_RETRIES + ")");
         pageLoaded.set(false);
         URL url = MonacoEditorView.class.getResource("/org/integratedmodelling/klabeditor/monaco/index.html");
         if (url != null) {
@@ -297,41 +303,41 @@ public class MonacoEditorView extends StackPane {
 
     private void installJsConsoleBridge() {
         String script = """
-        (function() {
-          if (!window.JavaBridge) { return; }
-          try {
-            var oldLog = console.log;
-            var oldWarn = console.warn;
-            var oldError = console.error;
-
-            function send(kind, args) {
-              try {
-                var msg = Array.prototype.map.call(args, function(a) {
-                  try { return String(a); } catch(e) { return "[object]"; }
-                }).join(" ");
-                window.JavaBridge.logFromJs("[" + kind + "] " + msg);
-              } catch(e) {
-                // ignore
-              }
-            }
-
-            console.log = function() {
-              if (oldLog) oldLog.apply(console, arguments);
-              send("LOG", arguments);
-            };
-            console.warn = function() {
-              if (oldWarn) oldWarn.apply(console, arguments);
-              send("WARN", arguments);
-            };
-            console.error = function() {
-              if (oldError) oldError.apply(console, arguments);
-              send("ERROR", arguments);
-            };
-          } catch (e) {
-            // swallow
-          }
-        })();
-        """;
+                (function() {
+                  if (!window.JavaBridge) { return; }
+                  try {
+                    var oldLog = console.log;
+                    var oldWarn = console.warn;
+                    var oldError = console.error;
+                
+                    function send(kind, args) {
+                      try {
+                        var msg = Array.prototype.map.call(args, function(a) {
+                          try { return String(a); } catch(e) { return "[object]"; }
+                        }).join(" ");
+                        window.JavaBridge.logFromJs("[" + kind + "] " + msg);
+                      } catch(e) {
+                        // ignore
+                      }
+                    }
+                
+                    console.log = function() {
+                      if (oldLog) oldLog.apply(console, arguments);
+                      send("LOG", arguments);
+                    };
+                    console.warn = function() {
+                      if (oldWarn) oldWarn.apply(console, arguments);
+                      send("WARN", arguments);
+                    };
+                    console.error = function() {
+                      if (oldError) oldError.apply(console, arguments);
+                      send("ERROR", arguments);
+                    };
+                  } catch (e) {
+                    // swallow
+                  }
+                })();
+                """;
 
         try {
             webEngine.executeScript(script);
@@ -352,19 +358,22 @@ public class MonacoEditorView extends StackPane {
         this.initialTheme = theme;
         loadRetryCount = 0; // Explicit call from caller — reset retry budget
         if (webView.isDebug()) {
-            // Build a classpath URL to index.html with query parameters so the external browser can auto-bootstrap
-            URL url = MonacoEditorView.class.getResource("/org/integratedmodelling/klabeditor/monaco/index.html");
+            // Build a classpath URL to index.html with query parameters so the external browser can
+            // auto-bootstrap
+            URL url = MonacoEditorView.class.getResource(
+                    "/org/integratedmodelling/klabeditor/monaco/index.html");
             if (url != null) {
                 String base = url.toExternalForm();
-                String q = "?language=" + URLEncoder.encode(initialLanguage, StandardCharsets.UTF_8)
-                        + "&theme=" + URLEncoder.encode(initialTheme, StandardCharsets.UTF_8)
-                        + "&highlighterServiceUrl=" + URLEncoder.encode(highlighterServiceUrl, StandardCharsets.UTF_8)
-                        + "&text=" + URLEncoder.encode(initialText, StandardCharsets.UTF_8);
+                String q = "?language=" + URLEncoder.encode(initialLanguage,
+                                                            StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
+                        initialTheme, StandardCharsets.UTF_8) + "&highlighterServiceUrl=" + URLEncoder.encode(
+                        highlighterServiceUrl, StandardCharsets.UTF_8) + "&text=" + URLEncoder.encode(
+                        initialText, StandardCharsets.UTF_8);
                 webEngine.load(base + q);
             } else {
                 // Fall back to embedded message (even though in debug we don't display it internally)
-                String msg = "Missing Monaco resources. Please copy the 'vs' folder from monaco-editor and " +
-                        "ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
+                String msg = "Missing Monaco resources. Please copy the 'vs' folder from monaco-editor and "
+                        + "ensure index.html exists under /org/integratedmodelling/klabeditor/monaco";
                 webEngine.loadContent("<html><body><pre>" + escapeHtml(msg) + "</pre></body></html>");
             }
             return;
@@ -375,28 +384,19 @@ public class MonacoEditorView extends StackPane {
     }
 
     private void initEditor(String text, String language, String theme) {
-        String uri = (documentUri != null && !documentUri.isBlank())
-                ? documentUri
-                : "inmemory:///untitled.kim";
+        String uri = (documentUri != null && !documentUri.isBlank()) ? documentUri : "inmemory:///untitled" +
+                                                                                     ".kim";
 
         System.out.println(
-                "[MonacoEditorView] initEditor uri=" + uri +
-                        " language=" + language +
-                        " theme=" + theme
-        );
+                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" + theme);
 
-        String js = "window.MonacoBridge && window.MonacoBridge.openDocument({"
-                + "uri:" + jsString(uri) + ","
-                + "language:" + jsString(language) + ","
-                + "theme:" + jsString(theme) + ","
-                + "highlighterServiceUrl:" + jsString(highlighterServiceUrl) + ","
-                + "text:" + jsString(text)
-                + "});";
+        String js = "window.MonacoBridge && window.MonacoBridge.openDocument({" + "uri:" + jsString(
+                uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(
+                theme) + "," + "highlighterServiceUrl:" + jsString(
+                highlighterServiceUrl) + "," + "text:" + jsString(text) + "});";
 
         safeExec(js);
     }
-
-
 
 
     /**
@@ -521,9 +521,7 @@ public class MonacoEditorView extends StackPane {
 
     private void safeExec(String script) {
         if (!pageLoaded.get()) {
-            System.out.println(
-                    "[MonacoEditorView] JS exec skipped (page not loaded)"
-            );
+            System.out.println("[MonacoEditorView] JS exec skipped (page not loaded)");
             return;
         }
 
@@ -531,9 +529,7 @@ public class MonacoEditorView extends StackPane {
             try {
                 webEngine.executeScript(script);
             } catch (Throwable t) {
-                System.err.println(
-                        "[MonacoEditorView] JS exec failed: " + script
-                );
+                System.err.println("[MonacoEditorView] JS exec failed: " + script);
                 t.printStackTrace();
             }
         });
@@ -558,9 +554,17 @@ public class MonacoEditorView extends StackPane {
         }
         CountDownLatch latch = new CountDownLatch(1);
         Platform.runLater(() -> {
-            try { action.run(); } finally { latch.countDown(); }
+            try {
+                action.run();
+            } finally {
+                latch.countDown();
+            }
         });
-        try { latch.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static <T> T runOnFxAndWait(Supplier<T> supplier) {
@@ -570,9 +574,17 @@ public class MonacoEditorView extends StackPane {
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<T> ref = new AtomicReference<>();
         Platform.runLater(() -> {
-            try { ref.set(supplier.get()); } finally { latch.countDown(); }
+            try {
+                ref.set(supplier.get());
+            } finally {
+                latch.countDown();
+            }
         });
-        try { latch.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
         return ref.get();
     }
 
@@ -614,7 +626,8 @@ public class MonacoEditorView extends StackPane {
 
             if (pendingDiagnosticsJson != null) {
                 System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
-                safeExec("window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
+                safeExec(
+                        "window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
             }
         }
 

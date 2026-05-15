@@ -17,7 +17,7 @@ interface MonacoBridgeApi {
   // New preferred API
   openDocument(doc: MonacoOpenDoc): void;
 
-  // Backwards compatible (optional) - you can remove later
+  // Backwards compatible (optional) - can remove later
   init(text: string, language?: string, theme?: string): void;
 
   setText(text: string): void;
@@ -573,46 +573,76 @@ function isCopyCutPaste(e: any) {
     state.semanticDecorationIds = editor.deltaDecorations(state.semanticDecorationIds, decorations);
   }
 
-  // This never worked
-  // function installWheelNormalizer() {
-  //   if (state._wheelNormalizerInstalled) return;
-  //   const ed: any = state.editor;
-  //   if (!ed) return;
-  //   const node: HTMLElement | null = (ed.getDomNode ? ed.getDomNode() : null) || state.container;
-  //   if (!node) return;
-  //
-  //   const handler = (ev: WheelEvent) => {
-  //     try {
-  //       if ((ev as any).ctrlKey) return; // keep zoom behavior
-  //       const dm = (ev as any).deltaMode;
-  //       if (dm === 2) { // DOM_DELTA_PAGE
-  //         ev.preventDefault();
-  //         ev.stopPropagation();
-  //         const sign = Math.sign((ev as any).deltaY || 0) || 0;
-  //         if (sign === 0) return;
-  //
-  //         let lineHeight = 18;
-  //         try {
-  //           const opt = (monaco as any).editor?.EditorOption?.lineHeight;
-  //           if (opt != null && ed.getOption) {
-  //             const v = ed.getOption(opt);
-  //             if (typeof v === 'number' && v > 0) lineHeight = v;
-  //           }
-  //         } catch { }
-  //
-  //         const linesPerTick = 3;
-  //         const dy = sign * lineHeight * linesPerTick;
-  //         const cur = ed.getScrollTop ? ed.getScrollTop() : 0;
-  //         if (ed.setScrollTop) ed.setScrollTop(cur + dy);
-  //       }
-  //     } catch { }
-  //   };
-  //
-  //   try { node.addEventListener('wheel', handler, { passive: false }); }
-  //   catch { try { node.addEventListener('wheel', handler as any, false); } catch { } }
-  //
-  //   state._wheelNormalizerInstalled = true;
-  // }
+  function installWheelNormalizer() {
+    if (state._wheelNormalizerInstalled) return;
+    const ed: any = state.editor;
+    if (!ed) return;
+    const node: HTMLElement | null = (ed.getDomNode ? ed.getDomNode() : null) || state.container;
+    if (!node) return;
+
+    const handler = (ev: WheelEvent) => {
+      try {
+        if ((ev as any).ctrlKey || (ev as any).metaKey) return; // keep zoom behavior
+        const deltaY = (ev as any).deltaY || 0;
+        if (!deltaY) return;
+
+        let lineHeight = 18;
+        try {
+          const opt = (monaco as any).editor?.EditorOption?.lineHeight;
+          if (opt != null && ed.getOption) {
+            const value = ed.getOption(opt);
+            if (typeof value === "number" && value > 0) {
+              lineHeight = value;
+            }
+          }
+        } catch { }
+        try {
+          const options = ed.getRawOptions ? ed.getRawOptions() : null;
+          if (options && typeof options.lineHeight === "number" && options.lineHeight > 0) {
+            lineHeight = options.lineHeight;
+          }
+        } catch { }
+
+        const deltaMode = (ev as any).deltaMode;
+        let deltaPixels: number;
+        if (deltaMode === 2) {
+          deltaPixels = Math.sign(deltaY) * lineHeight * 3;
+        } else if (deltaMode === 1) {
+          const maxLines = 6;
+          const lines = Math.max(-maxLines, Math.min(maxLines, deltaY));
+          deltaPixels = lines * lineHeight;
+        } else {
+          const maxPixels = lineHeight * 6;
+          deltaPixels = Math.abs(deltaY) > maxPixels
+            ? Math.sign(deltaY) * lineHeight * 3
+            : deltaY;
+        }
+
+        ev.preventDefault();
+        ev.stopPropagation();
+        if ((ev as any).stopImmediatePropagation) {
+          (ev as any).stopImmediatePropagation();
+        }
+
+        const current = ed.getScrollTop ? ed.getScrollTop() : 0;
+        if (ed.setScrollTop) {
+          ed.setScrollTop(current + deltaPixels);
+        }
+      } catch { }
+    };
+
+    const options: any = { passive: false, capture: true };
+    try { node.addEventListener("wheel", handler, options); }
+    catch { try { node.addEventListener("wheel", handler as any, true); } catch { } }
+    if (state.container && state.container !== node) {
+      try { state.container.addEventListener("wheel", handler, options); }
+      catch { try { state.container.addEventListener("wheel", handler as any, true); } catch { } }
+    }
+    try { document.addEventListener("wheel", handler, options); }
+    catch { try { document.addEventListener("wheel", handler as any, true); } catch { } }
+
+    state._wheelNormalizerInstalled = true;
+  }
 
   function ensureEditorCreated(theme: string, language: string) {
     if (!state.container) {
@@ -846,7 +876,7 @@ function isCopyCutPaste(e: any) {
       state.editor.executeEdits("java-bridge", edits);
     }
 
-    // installWheelNormalizer();
+    installWheelNormalizer();
   }
 
   function attachDirtyTracking(model: any) {
