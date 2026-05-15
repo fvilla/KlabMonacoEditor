@@ -1,10 +1,13 @@
 package org.integratedmodelling.klabeditor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
 import javafx.scene.Node;
+import javafx.util.Duration;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.StackPane;
@@ -57,6 +60,20 @@ public class MonacoEditorView extends StackPane {
     private final WebEngine webEngine = webView.getEngine();
 
     private final AtomicBoolean pageLoaded = new AtomicBoolean(false);
+    /**
+     * Set to true when JS calls back JavaBridge.onEditorReady(), confirming that monaco-bridge.js
+     * loaded AND the AMD require of vs/editor/editor.main completed. On Windows, either step can
+     * silently fail due to classpath URL resolution delays, leaving the editor blank.
+     */
+    private final AtomicBoolean editorJsReady = new AtomicBoolean(false);
+
+    /** Watchdog Timeline started after each successful page load. Triggers a page reload if the
+     *  JS side never calls onEditorReady() within the timeout window. */
+    private Timeline readinessWatchdog;
+    private int loadRetryCount = 0;
+    private static final int MAX_LOAD_RETRIES = 3;
+    private static final double READINESS_TIMEOUT_SECONDS = 2.0;
+
     private volatile JSObject window;
     private Consumer<Integer> cursorPositionListener;
     private Consumer<String> onSaveListener;
@@ -160,16 +177,60 @@ public class MonacoEditorView extends StackPane {
         return (obs, old, state) -> {
             if (state == Worker.State.SUCCEEDED) {
                 pageLoaded.set(true);
+                editorJsReady.set(false); // Reset: JS must confirm readiness via onEditorReady()
                 window = (JSObject) webEngine.executeScript("window");
 
                 // Provide a Java connector object callable from JS: window.JavaBridge
                 JSObject win = window;
                 win.setMember("JavaBridge", javaBridge);
                 installJsConsoleBridge();
-                // If we had initial text requested before page loaded, initialize now
+                // Speculative early call: succeeds if MonacoBridge is already defined and AMD is
+                // ready. If MonacoBridge isn't available yet the JS guard (&&) silently drops the
+                // call; onEditorReady() will re-try once the JS side confirms it is fully ready.
                 Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
+                // Start watchdog - if JS never calls back within the timeout we reload the page
+                startReadinessWatchdog();
             }
         };
+    }
+
+    /**
+     * Starts (or restarts) a one-shot Timeline that reloads the editor page when the JS bridge
+     * has not confirmed readiness within {@link #READINESS_TIMEOUT_SECONDS}. This covers the
+     * Windows-specific failure mode where classpath URL resolution for monaco-bridge.js or
+     * vs/editor/editor.main is delayed/silently dropped, leaving the WebView blank.
+     * <p>
+     * Must be called on the FX application thread.
+     */
+    private void startReadinessWatchdog() {
+        if (readinessWatchdog != null) {
+            readinessWatchdog.stop();
+        }
+        readinessWatchdog = new Timeline(
+                new KeyFrame(Duration.seconds(READINESS_TIMEOUT_SECONDS), e -> onWatchdogFired())
+        );
+        readinessWatchdog.setCycleCount(1);
+        readinessWatchdog.play();
+    }
+
+    private void onWatchdogFired() {
+        if (editorJsReady.get()) {
+            return; // Fired just after JS confirmed ready; nothing to do
+        }
+        if (loadRetryCount >= MAX_LOAD_RETRIES) {
+            System.err.println("[MonacoEditorView] Monaco editor did not become ready after "
+                    + MAX_LOAD_RETRIES + " retries — giving up.");
+            return;
+        }
+        loadRetryCount++;
+        System.out.println("[MonacoEditorView] Editor JS bridge not ready within "
+                + (int) READINESS_TIMEOUT_SECONDS + "s — reloading page "
+                + "(attempt " + loadRetryCount + "/" + MAX_LOAD_RETRIES + ")");
+        pageLoaded.set(false);
+        URL url = MonacoEditorView.class.getResource("/org/integratedmodelling/klabeditor/monaco/index.html");
+        if (url != null) {
+            webEngine.load(url.toExternalForm());
+        }
     }
 
     private void installJsConsoleBridge() {
@@ -227,6 +288,7 @@ public class MonacoEditorView extends StackPane {
         this.initialText = text == null ? "" : text;
         this.initialLanguage = language;
         this.initialTheme = theme;
+        loadRetryCount = 0; // Explicit call from caller — reset retry budget
         if (webView.isDebug()) {
             // Build a classpath URL to index.html with query parameters so the external browser can auto-bootstrap
             URL url = MonacoEditorView.class.getResource("/org/integratedmodelling/klabeditor/monaco/index.html");
@@ -467,8 +529,24 @@ public class MonacoEditorView extends StackPane {
     public class JavaBridge {
 
         public void onEditorReady() {
-            // Currently we rely on JS to queue calls before ready; this is just a hook if needed.
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
+            editorJsReady.set(true);
+            loadRetryCount = 0; // Success — reset retry counter for any future reloads
+
+            // Cancel the watchdog: JS has confirmed the bridge is fully operational.
+            // This callback runs on the FX thread (JS->Java call), so Timeline.stop() is safe here.
+            if (readinessWatchdog != null) {
+                readinessWatchdog.stop();
+            }
+
+            // Always (re-)initialize the editor from here. When monaco-bridge.js or the AMD
+            // require of vs/editor/editor.main was delayed on Windows, the speculative initEditor()
+            // call in the SUCCEEDED handler would have found window.MonacoBridge undefined and
+            // been silently dropped. Now that JS confirms full readiness, we guarantee the call goes
+            // through. If initEditor() already ran successfully, openDocument() is idempotent and
+            // will simply update the model — no visible side-effect.
+            Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
+
             if (pendingDiagnosticsJson != null) {
                 System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
                 safeExec("window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
