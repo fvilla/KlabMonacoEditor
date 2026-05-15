@@ -85,6 +85,7 @@ public class MonacoEditorView extends StackPane {
     private String initialText = "";
     private String initialLanguage = "plaintext";
     private String initialTheme = "vs-dark";
+    private String highlighterServiceUrl = "http://localhost:8765";
 
     private Consumer<String> changeListener;
     private final String documentUri;
@@ -93,6 +94,11 @@ public class MonacoEditorView extends StackPane {
 
     public MonacoEditorView() {
         this(null,null);
+    }
+
+    public MonacoEditorView(int highlighterServicePort) {
+        this(null, null);
+        setHighlighterServicePort(highlighterServicePort);
     }
 
     public MonacoEditorView(String documentUri, Consumer<String> saveCallback) {
@@ -131,6 +137,53 @@ public class MonacoEditorView extends StackPane {
 
     public String getDocumentUri() {
         return documentUri;
+    }
+
+    public void setHighlighterServicePort(int port) {
+        if (port <= 0 || port > 65535) {
+            throw new IllegalArgumentException("Invalid highlighter service port: " + port);
+        }
+        setHighlighterServiceUrl("http://localhost:" + port);
+    }
+
+    public void setHighlighterServiceUrl(String highlighterServiceUrl) {
+        if (highlighterServiceUrl == null || highlighterServiceUrl.isBlank()) {
+            this.highlighterServiceUrl = "http://localhost:8765";
+        } else {
+            this.highlighterServiceUrl = highlighterServiceUrl.replaceAll("/+$", "");
+        }
+        safeExec("window.MonacoBridge && window.MonacoBridge.configureHighlighter("
+                + jsString(this.highlighterServiceUrl) + ");");
+    }
+
+    public String getHighlighterServiceUrl() {
+        return highlighterServiceUrl;
+    }
+
+    public void preloadConceptHighlighterCache(Map<String, String> conceptCategories) {
+        if (conceptCategories == null || conceptCategories.isEmpty()) {
+            return;
+        }
+        try {
+            String json = new ObjectMapper().writeValueAsString(conceptCategories);
+            safeExec("window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json + ");");
+        } catch (Exception e) {
+            System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
+            e.printStackTrace();
+        }
+    }
+
+    public void preloadConceptHighlighterCache(List<String> concepts) {
+        if (concepts == null || concepts.isEmpty()) {
+            return;
+        }
+        try {
+            String json = new ObjectMapper().writeValueAsString(concepts);
+            safeExec("window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json + ");");
+        } catch (Exception e) {
+            System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
+            e.printStackTrace();
+        }
     }
 
     public void setDiagnostics(List<Diagnostic> diagnostics) {
@@ -184,14 +237,23 @@ public class MonacoEditorView extends StackPane {
                 JSObject win = window;
                 win.setMember("JavaBridge", javaBridge);
                 installJsConsoleBridge();
-                // Speculative early call: succeeds if MonacoBridge is already defined and AMD is
-                // ready. If MonacoBridge isn't available yet the JS guard (&&) silently drops the
-                // call; onEditorReady() will re-try once the JS side confirms it is fully ready.
-                Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
                 // Start watchdog - if JS never calls back within the timeout we reload the page
                 startReadinessWatchdog();
+                notifyBridgeIfAlreadyReady();
             }
         };
+    }
+
+    private void notifyBridgeIfAlreadyReady() {
+        try {
+            webEngine.executeScript("""
+                    window.MonacoBridge
+                    && window.MonacoBridge._notifyJavaReady
+                    && window.MonacoBridge._notifyJavaReady();
+                    """);
+        } catch (Throwable t) {
+            System.err.println("[MonacoEditorView] Failed to request JS ready notification: " + t.getMessage());
+        }
     }
 
     /**
@@ -296,6 +358,7 @@ public class MonacoEditorView extends StackPane {
                 String base = url.toExternalForm();
                 String q = "?language=" + URLEncoder.encode(initialLanguage, StandardCharsets.UTF_8)
                         + "&theme=" + URLEncoder.encode(initialTheme, StandardCharsets.UTF_8)
+                        + "&highlighterServiceUrl=" + URLEncoder.encode(highlighterServiceUrl, StandardCharsets.UTF_8)
                         + "&text=" + URLEncoder.encode(initialText, StandardCharsets.UTF_8);
                 webEngine.load(base + q);
             } else {
@@ -326,6 +389,7 @@ public class MonacoEditorView extends StackPane {
                 + "uri:" + jsString(uri) + ","
                 + "language:" + jsString(language) + ","
                 + "theme:" + jsString(theme) + ","
+                + "highlighterServiceUrl:" + jsString(highlighterServiceUrl) + ","
                 + "text:" + jsString(text)
                 + "});";
 
@@ -530,7 +594,7 @@ public class MonacoEditorView extends StackPane {
 
         public void onEditorReady() {
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
-            editorJsReady.set(true);
+            boolean firstReadySignal = editorJsReady.compareAndSet(false, true);
             loadRetryCount = 0; // Success — reset retry counter for any future reloads
 
             // Cancel the watchdog: JS has confirmed the bridge is fully operational.
@@ -539,12 +603,13 @@ public class MonacoEditorView extends StackPane {
                 readinessWatchdog.stop();
             }
 
-            // Always (re-)initialize the editor from here. When monaco-bridge.js or the AMD
-            // require of vs/editor/editor.main was delayed on Windows, the speculative initEditor()
-            // call in the SUCCEEDED handler would have found window.MonacoBridge undefined and
-            // been silently dropped. Now that JS confirms full readiness, we guarantee the call goes
-            // through. If initEditor() already ran successfully, openDocument() is idempotent and
-            // will simply update the model — no visible side-effect.
+            if (!firstReadySignal) {
+                return;
+            }
+
+            // Initialize the editor only on the first ready signal after a page load. JS may emit
+            // additional ready callbacks, and treating each one as a new initialization request can
+            // recursively reopen the document.
             Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
 
             if (pendingDiagnosticsJson != null) {

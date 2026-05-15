@@ -44,13 +44,13 @@
       if (window.MonacoBridge && window.MonacoBridge._onAmdReady) {
         const container = document.getElementById('container');
         window.MonacoBridge._onAmdReady(container);
-        try { window.JavaBridge?.onEditorReady?.(); } catch {}
         // If running outside JavaFX (no window.JavaBridge), auto-initialize so the page renders.
         if (!(window.JavaBridge)) {
           try {
             const params = new URLSearchParams(window.location.search || '');
             const language = params.get('language') || 'plaintext';
             const theme = params.get('theme') || 'vs-dark';
+            const highlighterServiceUrl = params.get('highlighterServiceUrl') || 'http://localhost:8765';
             let text = params.get('text') || '';
             // Allow very long text, but avoid accidental megabytes in debug runs
             if (text.length > 200000) {
@@ -60,6 +60,7 @@
               uri: "inmemory:///debug.kim",
               language,
               theme,
+              highlighterServiceUrl,
               text
             });
 
