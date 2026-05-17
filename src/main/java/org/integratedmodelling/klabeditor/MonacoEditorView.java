@@ -16,6 +16,7 @@ import netscape.javascript.JSObject;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Range;
+import org.integratedmodelling.klabeditor.lsp.KlabLspService;
 
 import java.net.URL;
 import java.net.URLEncoder;
@@ -68,8 +69,10 @@ public class MonacoEditorView extends StackPane {
      */
     private final AtomicBoolean editorJsReady = new AtomicBoolean(false);
 
-    /** Watchdog Timeline started after each successful page load. Triggers a page reload if the
-     *  JS side never calls onEditorReady() within the timeout window. */
+    /**
+     * Watchdog Timeline started after each successful page load. Triggers a page reload if the
+     * JS side never calls onEditorReady() within the timeout window.
+     */
     private Timeline readinessWatchdog;
     private int loadRetryCount = 0;
     private static final int MAX_LOAD_RETRIES = 3;
@@ -300,10 +303,10 @@ public class MonacoEditorView extends StackPane {
     private void notifyBridgeIfAlreadyReady() {
         try {
             webEngine.executeScript("""
-                                            window.MonacoBridge
-                                            && window.MonacoBridge._notifyJavaReady
-                                            && window.MonacoBridge._notifyJavaReady();
-                                            """);
+                    window.MonacoBridge
+                    && window.MonacoBridge._notifyJavaReady
+                    && window.MonacoBridge._notifyJavaReady();
+                    """);
         } catch (Throwable t) {
             System.err.println(
                     "[MonacoEditorView] Failed to request JS ready notification: " + t.getMessage());
@@ -431,8 +434,14 @@ public class MonacoEditorView extends StackPane {
     }
 
     private void initEditor(String text, String language, String theme) {
+
         String uri = (documentUri != null && !documentUri.isBlank()) ? documentUri : "inmemory:///untitled" +
                                                                                      ".kim";
+        var keywords = KlabLspService.getInstance().getLanguageKeywords(language);
+        if (keywords != null && !keywords.isEmpty()) {
+            preloadKeywordHighlighterCache(language, keywords);
+        }
+        preloadConceptHighlighterCache(KlabLspService.getInstance().getConceptCache());
 
         System.out.println(
                 "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" + theme);

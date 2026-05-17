@@ -10,16 +10,14 @@ import org.integratedmodelling.klab.api.knowledge.Concept;
 import org.integratedmodelling.klab.api.knowledge.KlabAsset;
 import org.integratedmodelling.klab.api.knowledge.SemanticType;
 import org.integratedmodelling.klab.api.knowledge.Worldview;
+import org.integratedmodelling.klab.api.lang.KlabLanguage;
 import org.integratedmodelling.klab.api.lang.LanguageDescriptor;
 import org.integratedmodelling.klab.api.lang.kim.KimConceptStatement;
 import org.integratedmodelling.klab.api.scope.UserScope;
 import org.integratedmodelling.klab.api.services.ResourcesService;
 
 import java.rmi.MarshalledObject;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Function;
 
@@ -47,6 +45,18 @@ public class KlabLspService {
     private volatile boolean initialized = false;
 
     private KlabLspService() {
+    }
+
+    public List<String> getLanguageKeywords(String language) {
+        var languageType = KlabLanguage.forId(language);
+        if (languageType == null) {
+            return Collections.emptyList();
+        }
+        var descriptor = languageConfig.getLanguages().get(languageType);
+        if (descriptor == null) {
+            return Collections.emptyList();
+        }
+        return descriptor.getKeywords();
     }
 
     /**
