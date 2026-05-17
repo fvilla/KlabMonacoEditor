@@ -9,7 +9,11 @@ module org.integratedmodelling.klabeditor {
     requires javafx.fxml;
     requires javafx.web;
     requires org.eclipse.lsp4j;
+    requires org.eclipse.lsp4j.jsonrpc;
+    requires klab.core.api;
+    requires java.rmi;
 
     opens org.integratedmodelling.klabeditor to javafx.fxml;
     exports org.integratedmodelling.klabeditor;
+    exports org.integratedmodelling.klabeditor.lsp;
 }

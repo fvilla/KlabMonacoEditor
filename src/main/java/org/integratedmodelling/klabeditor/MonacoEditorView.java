@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -80,6 +81,9 @@ public class MonacoEditorView extends StackPane {
     private Consumer<Boolean> onDirtyChangedListener;
     private volatile boolean isDirty;
     private volatile String pendingDiagnosticsJson = null;
+    private volatile String pendingConceptHighlighterJson = null;
+    private volatile String pendingKeywordHighlighterJson = null;
+    private final Map<String, List<String>> pendingKeywordHighlighterCache = new HashMap<>();
 
     // Memorize last requested init so we can re-apply if needed
     private String initialText = "";
@@ -132,8 +136,6 @@ public class MonacoEditorView extends StackPane {
                 webEngine.load(url.toExternalForm());
             }
         }
-
-
     }
 
     public String getDocumentUri() {
@@ -155,6 +157,7 @@ public class MonacoEditorView extends StackPane {
         }
         safeExec("window.MonacoBridge && window.MonacoBridge.configureHighlighter(" + jsString(
                 this.highlighterServiceUrl) + ");");
+        replayPendingHighlighterCaches();
     }
 
     public String getHighlighterServiceUrl() {
@@ -167,6 +170,7 @@ public class MonacoEditorView extends StackPane {
         }
         try {
             String json = new ObjectMapper().writeValueAsString(conceptCategories);
+            pendingConceptHighlighterJson = json;
             safeExec(
                     "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json +
                             ");");
@@ -182,11 +186,54 @@ public class MonacoEditorView extends StackPane {
         }
         try {
             String json = new ObjectMapper().writeValueAsString(concepts);
+            pendingConceptHighlighterJson = json;
             safeExec(
                     "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json +
                             ");");
         } catch (Exception e) {
             System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
+            e.printStackTrace();
+        }
+    }
+
+    public void preloadKeywordHighlighterCache(String language, List<String> keywords) {
+        if (language == null || language.isBlank() || keywords == null || keywords.isEmpty()) {
+            return;
+        }
+        preloadKeywordHighlighterCache(Map.of(language, keywords));
+    }
+
+    public void preloadKeywordHighlighterCache(Map<String, List<String>> languageKeywords) {
+        if (languageKeywords == null || languageKeywords.isEmpty()) {
+            return;
+        }
+        try {
+            Map<String, List<String>> sanitized = new HashMap<>();
+            for (Map.Entry<String, List<String>> entry : languageKeywords.entrySet()) {
+                if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null) {
+                    continue;
+                }
+                List<String> keywords = entry.getValue().stream()
+                        .filter(Objects::nonNull)
+                        .filter(keyword -> !keyword.isBlank())
+                        .distinct()
+                        .toList();
+                if (!keywords.isEmpty()) {
+                    sanitized.put(entry.getKey(), keywords);
+                }
+            }
+            if (sanitized.isEmpty()) {
+                return;
+            }
+
+            pendingKeywordHighlighterCache.putAll(sanitized);
+            String json = new ObjectMapper().writeValueAsString(pendingKeywordHighlighterCache);
+            pendingKeywordHighlighterJson = json;
+            safeExec(
+                    "window.MonacoBridge && window.MonacoBridge.preloadKeywordHighlighterCache(" + json +
+                            ");");
+        } catch (Exception e) {
+            System.err.println("[MonacoEditorView] Failed to preload keyword highlighter cache");
             e.printStackTrace();
         }
     }
@@ -365,7 +412,7 @@ public class MonacoEditorView extends StackPane {
             if (url != null) {
                 String base = url.toExternalForm();
                 String q = "?language=" + URLEncoder.encode(initialLanguage,
-                                                            StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
+                        StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
                         initialTheme, StandardCharsets.UTF_8) + "&highlighterServiceUrl=" + URLEncoder.encode(
                         highlighterServiceUrl, StandardCharsets.UTF_8) + "&text=" + URLEncoder.encode(
                         initialText, StandardCharsets.UTF_8);
@@ -475,7 +522,7 @@ public class MonacoEditorView extends StackPane {
     public void createMarkerByOffset(int offset, int length, String message, String severity) {
         String js =
                 "window.MonacoBridge && window.MonacoBridge.createMarkerByOffset(" + offset + "," + length + "," + jsString(
-                message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
+                        message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
         safeExec(js);
     }
 
@@ -594,6 +641,19 @@ public class MonacoEditorView extends StackPane {
         return '"' + esc + '"';
     }
 
+    private void replayPendingHighlighterCaches() {
+        if (pendingConceptHighlighterJson != null) {
+            safeExec(
+                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" +
+                            pendingConceptHighlighterJson + ");");
+        }
+        if (pendingKeywordHighlighterJson != null) {
+            safeExec(
+                    "window.MonacoBridge && window.MonacoBridge.preloadKeywordHighlighterCache(" +
+                            pendingKeywordHighlighterJson + ");");
+        }
+    }
+
     private static String escapeHtml(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
@@ -622,6 +682,7 @@ public class MonacoEditorView extends StackPane {
             // Initialize the editor only on the first ready signal after a page load. JS may emit
             // additional ready callbacks, and treating each one as a new initialization request can
             // recursively reopen the document.
+            replayPendingHighlighterCaches();
             Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
 
             if (pendingDiagnosticsJson != null) {

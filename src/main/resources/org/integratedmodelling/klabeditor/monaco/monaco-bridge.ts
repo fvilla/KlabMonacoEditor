@@ -37,6 +37,7 @@ interface MonacoBridgeApi {
 
   configureHighlighter(serviceUrl: string): void;
   preloadConceptHighlighterCache(concepts: any): void;
+  preloadKeywordHighlighterCache(keywords: any): void;
   connectLsp(wsUrl: string, languageId?: string): Promise<boolean>; // unused in klab-ide integration
   _onAmdReady(container: HTMLElement): void;
   _notifyJavaReady(): boolean;
@@ -365,8 +366,63 @@ function isCopyCutPaste(e: any) {
     return [];
   }
 
+  function cacheKeywords(language: any, payload: any, changed: string[]) {
+    const spec = normalizeLanguage(String(language || ""));
+    if (!spec) return;
+
+    const seen: { [keyword: string]: boolean } = {};
+    const keywords = normalizeKeywordPayload(payload).filter((keyword) => {
+      if (!keyword || seen[keyword]) return false;
+      seen[keyword] = true;
+      return true;
+    });
+
+    keywordCache[spec.name] = keywords;
+    changed.push(spec.name);
+  }
+
+  function preloadKeywordCache(payload: any): string[] {
+    const changed: string[] = [];
+    if (!payload) return changed;
+
+    if (Array.isArray(payload)) {
+      if (state.activeLanguageSpec) {
+        cacheKeywords(state.activeLanguageSpec.name, payload, changed);
+      }
+      return changed;
+    }
+
+    if (typeof payload === "object") {
+      if (typeof payload.language === "string" && Array.isArray(payload.keywords)) {
+        cacheKeywords(payload.language, payload.keywords, changed);
+        return changed;
+      }
+
+      for (const language in payload) {
+        if (!Object.prototype.hasOwnProperty.call(payload, language)) continue;
+        cacheKeywords(language, payload[language], changed);
+      }
+    }
+
+    return changed;
+  }
+
+  function refreshActiveKeywordTokenization(changed: string[]) {
+    if (!changed.length) return;
+    ensureReady(() => {
+      const spec = state.activeLanguageSpec;
+      if (!spec || changed.indexOf(spec.name) < 0) return;
+
+      registerKlabLanguage(spec, keywordCache[spec.name] || []);
+      const model = state.editor?.getModel?.();
+      if (model) {
+        try { monaco.editor.setModelLanguage(model, spec.id); } catch {}
+      }
+    });
+  }
+
   async function loadKeywords(spec: KlabLanguageSpec): Promise<string[]> {
-    if (keywordCache[spec.name]) return keywordCache[spec.name];
+    if (Object.prototype.hasOwnProperty.call(keywordCache, spec.name)) return keywordCache[spec.name];
     const payload = await fetchJson("/" + encodeURIComponent(spec.name) + "/keywords");
     const keywords = normalizeKeywordPayload(payload);
     keywordCache[spec.name] = keywords;
@@ -614,8 +670,8 @@ function isCopyCutPaste(e: any) {
         } else {
           const maxPixels = lineHeight * 6;
           deltaPixels = Math.abs(deltaY) > maxPixels
-            ? Math.sign(deltaY) * lineHeight * 3
-            : deltaY;
+              ? Math.sign(deltaY) * lineHeight * 3
+              : deltaY;
         }
 
         ev.preventDefault();
@@ -829,7 +885,7 @@ function isCopyCutPaste(e: any) {
       for (const sel of sels) {
         if (!sel) continue;
         const empty = sel.startLineNumber === sel.endLineNumber &&
-                      sel.startColumn === sel.endColumn;
+            sel.startColumn === sel.endColumn;
         if (empty) {
           const line = sel.startLineNumber;
           texts.push((model.getLineContent(line) || "") + "\n");
@@ -1119,6 +1175,10 @@ function isCopyCutPaste(e: any) {
 
     preloadConceptHighlighterCache(concepts: any) {
       preloadConceptCache(concepts).then(() => scheduleSemanticHighlight());
+    },
+
+    preloadKeywordHighlighterCache(keywords: any) {
+      refreshActiveKeywordTokenization(preloadKeywordCache(keywords));
     },
 
     async connectLsp(wsUrl: string, languageId?: string): Promise<boolean> {
