@@ -6,7 +6,6 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageServer;
 import org.integratedmodelling.klab.api.engine.distribution.LocalInstance;
-import org.integratedmodelling.klab.api.knowledge.Concept;
 import org.integratedmodelling.klab.api.knowledge.KlabAsset;
 import org.integratedmodelling.klab.api.knowledge.SemanticType;
 import org.integratedmodelling.klab.api.knowledge.Worldview;
@@ -16,8 +15,10 @@ import org.integratedmodelling.klab.api.lang.kim.KimConceptStatement;
 import org.integratedmodelling.klab.api.scope.UserScope;
 import org.integratedmodelling.klab.api.services.ResourcesService;
 
-import java.rmi.MarshalledObject;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.function.Function;
 
@@ -81,14 +82,15 @@ public class KlabLspService {
         try {
             LanguageClient client = new KlabLanguageClient();
 
-            this.languageConfig =
-                    scope
-                            .getService(ResourcesService.class)
-                            .info("", KlabAsset.KnowledgeClass.INFORMATION, LanguageDescriptor.class, scope);
+            this.languageConfig = scope.getService(ResourcesService.class).info("",
+                                                                                KlabAsset.KnowledgeClass.INFORMATION,
+                                                                                LanguageDescriptor.class,
+                                                                                scope);
 
             this.conceptMap = updateConceptMap(scope.getWorldview());
 
-            launcher = Launcher.createLauncher(client, LanguageServer.class, lspServer.getInputStream(), lspServer.getOutputStream(), executor, Function.identity());
+            launcher = Launcher.createLauncher(client, LanguageServer.class, lspServer.getInputStream(),
+                                               lspServer.getOutputStream(), executor, Function.identity());
             server = launcher.getRemoteProxy();
             launcher.startListening();
 
@@ -129,7 +131,8 @@ public class KlabLspService {
                 type = "EXTENT";
             } else if (concept.getType().contains(SemanticType.PROCESS)) {
                 type = "PROCESS";
-            } else if (concept.getType().contains(SemanticType.SUBJECT)) {
+            } else if (concept.getType().contains(SemanticType.SUBJECT) || concept.getType().contains(
+                    SemanticType.AGENT)) {
                 type = "SUBJECT";
             }
             conceptMap.put(concept.getNamespace() + ":" + concept.getUrn(), type);
@@ -160,7 +163,8 @@ public class KlabLspService {
         DidOpenTextDocumentParams params = new DidOpenTextDocumentParams(item);
         server.getTextDocumentService().didOpen(params);
 
-        System.out.println("[LSP] didOpen uri=" + uri + " version=1 len=" + (text != null ? text.length() : 0));
+        System.out.println(
+                "[LSP] didOpen uri=" + uri + " version=1 len=" + (text != null ? text.length() : 0));
     }
 
     public void changeDocument(String uri, String newText) {
@@ -169,7 +173,8 @@ public class KlabLspService {
         Integer current = docVersions.get(uri);
         if (current == null) {
             // This is *very* useful to detect ordering bugs (didChange before didOpen)
-            System.err.println("[LSP] didChange called for unopened uri=" + uri + " -> forcing baseline version");
+            System.err.println(
+                    "[LSP] didChange called for unopened uri=" + uri + " -> forcing baseline version");
             docVersions.put(uri, 1);
         }
 
@@ -182,11 +187,14 @@ public class KlabLspService {
         id.setUri(uri);
         id.setVersion(v);
 
-        DidChangeTextDocumentParams params = new DidChangeTextDocumentParams(id, Collections.singletonList(change));
+        DidChangeTextDocumentParams params = new DidChangeTextDocumentParams(id, Collections.singletonList(
+                change));
 
         try {
             server.getTextDocumentService().didChange(params);
-            System.out.println("[LSP] didChange uri=" + uri + " version=" + v + " len=" + (newText != null ? newText.length() : 0));
+            System.out.println(
+                    "[LSP] didChange uri=" + uri + " version=" + v + " len=" + (newText != null ?
+                                                                                newText.length() : 0));
         } catch (Exception e) {
             System.err.println("[LSP] didChange failed uri=" + uri + " version=" + v);
             e.printStackTrace();
@@ -207,7 +215,8 @@ public class KlabLspService {
         }
     }
 
-    public CompletableFuture<Either<List<CompletionItem>, CompletionList>> completion(String uri, int line, int character) {
+    public CompletableFuture<Either<List<CompletionItem>, CompletionList>> completion(String uri, int line,
+                                                                                      int character) {
 
         if (!initialized) {
             CompletableFuture<Either<List<CompletionItem>, CompletionList>> f = new CompletableFuture<>();
@@ -217,7 +226,8 @@ public class KlabLspService {
 
         TextDocumentIdentifier id = new TextDocumentIdentifier(uri);
         Position pos = new Position(line, character);
-        CompletionParams params = new CompletionParams(new TextDocumentIdentifier(uri), new Position(line, character));
+        CompletionParams params = new CompletionParams(new TextDocumentIdentifier(uri),
+                                                       new Position(line, character));
         return server.getTextDocumentService().completion(params);
     }
 

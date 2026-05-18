@@ -320,6 +320,7 @@ function isCopyCutPaste(e: any) {
           [/[a-zA-Z_$][\w$]*/, { cases: { "@keywords": "klab.keyword", "@default": "identifier" } }],
           [/@symbols/, { cases: { "@operators": "klab.operator", "@default": "" } }],
           [/\[/, "@brackets", "@groovy"],
+          [/===/, "klab.delimiter"],
           [/\{\{/, "klab.delimiter"],
           [/\}\}/, "klab.delimiter"],
           [/[{}()]/, "@brackets"],
