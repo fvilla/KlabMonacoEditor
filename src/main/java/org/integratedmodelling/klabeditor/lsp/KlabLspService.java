@@ -83,14 +83,14 @@ public class KlabLspService {
             LanguageClient client = new KlabLanguageClient();
 
             this.languageConfig = scope.getService(ResourcesService.class).info("",
-                                                                                KlabAsset.KnowledgeClass.INFORMATION,
-                                                                                LanguageDescriptor.class,
-                                                                                scope);
+                    KlabAsset.KnowledgeClass.INFORMATION,
+                    LanguageDescriptor.class,
+                    scope);
 
             this.conceptMap = updateConceptMap(scope.getWorldview());
 
             launcher = Launcher.createLauncher(client, LanguageServer.class, lspServer.getInputStream(),
-                                               lspServer.getOutputStream(), executor, Function.identity());
+                    lspServer.getOutputStream(), executor, Function.identity());
             server = launcher.getRemoteProxy();
             launcher.startListening();
 
@@ -151,8 +151,14 @@ public class KlabLspService {
     public void openDocument(String uri, String languageId, String text) {
         if (!initialized) return;
 
-        // Set baseline version for this document (start at 1)
-        docVersions.put(uri, 1);
+        Integer existingVersion = docVersions.putIfAbsent(uri, 1);
+        if (existingVersion != null) {
+            System.out.println(
+                    "[LSP] openDocument called for already-open uri=" + uri + " version=" + existingVersion +
+                            " -> syncing with didChange");
+            changeDocument(uri, text);
+            return;
+        }
 
         TextDocumentItem item = new TextDocumentItem();
         item.setUri(uri);
@@ -161,10 +167,15 @@ public class KlabLspService {
         item.setText(text);
 
         DidOpenTextDocumentParams params = new DidOpenTextDocumentParams(item);
-        server.getTextDocumentService().didOpen(params);
-
-        System.out.println(
-                "[LSP] didOpen uri=" + uri + " version=1 len=" + (text != null ? text.length() : 0));
+        try {
+            server.getTextDocumentService().didOpen(params);
+            System.out.println(
+                    "[LSP] didOpen uri=" + uri + " version=1 len=" + (text != null ? text.length() : 0));
+        } catch (Exception e) {
+            docVersions.remove(uri);
+            System.err.println("[LSP] didOpen failed uri=" + uri);
+            e.printStackTrace();
+        }
     }
 
     public void changeDocument(String uri, String newText) {
@@ -172,10 +183,9 @@ public class KlabLspService {
 
         Integer current = docVersions.get(uri);
         if (current == null) {
-            // This is *very* useful to detect ordering bugs (didChange before didOpen)
             System.err.println(
-                    "[LSP] didChange called for unopened uri=" + uri + " -> forcing baseline version");
-            docVersions.put(uri, 1);
+                    "[LSP] didChange ignored for unopened uri=" + uri + "; call openDocument first");
+            return;
         }
 
         int v = nextVersion(uri);
@@ -194,7 +204,7 @@ public class KlabLspService {
             server.getTextDocumentService().didChange(params);
             System.out.println(
                     "[LSP] didChange uri=" + uri + " version=" + v + " len=" + (newText != null ?
-                                                                                newText.length() : 0));
+                            newText.length() : 0));
         } catch (Exception e) {
             System.err.println("[LSP] didChange failed uri=" + uri + " version=" + v);
             e.printStackTrace();
@@ -227,7 +237,7 @@ public class KlabLspService {
         TextDocumentIdentifier id = new TextDocumentIdentifier(uri);
         Position pos = new Position(line, character);
         CompletionParams params = new CompletionParams(new TextDocumentIdentifier(uri),
-                                                       new Position(line, character));
+                new Position(line, character));
         return server.getTextDocumentService().completion(params);
     }
 

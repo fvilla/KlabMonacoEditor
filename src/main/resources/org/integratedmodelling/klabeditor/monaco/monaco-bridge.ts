@@ -1132,6 +1132,9 @@ function isCopyCutPaste(e: any) {
                     }
 
                     const uri = monaco.Uri.parse(doc.uri);
+                    const previousUri = state._currentUri?.toString?.();
+                    const nextUri = uri.toString?.() || doc.uri;
+                    const isSwitchingDocument = previousUri !== nextUri;
                     state._currentUri = uri;
 
                     let model = monaco.editor.getModel(uri);
@@ -1153,11 +1156,12 @@ function isCopyCutPaste(e: any) {
                         logWarn(`Failed to set theme ${theme}`);
                     }
 
-                    // Clear old diagnostics when switching document
-                    try {
-                        monaco.editor.setModelMarkers(model, "kim-lsp", []);
-                    } catch (e) {
-                        logWarn("Failed to clear diagnostics on openDocument");
+                    if (isSwitchingDocument) {
+                        try {
+                            monaco.editor.setModelMarkers(model, "kim-lsp", []);
+                        } catch (e) {
+                            logWarn("Failed to clear diagnostics on openDocument");
+                        }
                     }
 
                     attachDirtyTracking(model);
