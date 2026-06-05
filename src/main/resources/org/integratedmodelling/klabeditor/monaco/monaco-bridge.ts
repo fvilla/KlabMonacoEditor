@@ -125,7 +125,7 @@ function isCopyCutPaste(e: any) {
     ];
 
     const COLOR_RGB: { [name: string]: number[] } = {
-        DOMAIN: [255, 255, 255],
+        DOMAIN: [105, 255, 254],
         CONFIGURATION: [0, 100, 100],
         EVENT: [153, 153, 0],
         EXTENT: [0, 153, 153],
@@ -295,7 +295,7 @@ function isCopyCutPaste(e: any) {
         const rules: any[] = [
             {token: "klab.keyword", foreground: rgb("KEYWORD").substring(1), fontStyle: "bold"},
             {token: "klab.comment", foreground: "4ea64e", fontStyle: "italic"},
-            {token: "klab.doccomment", foreground: "008000"},
+            {token: "klab.doccomment", foreground: "0000a0"},
             {token: "klab.operator", foreground: rgb("VALUE_OPERATOR").substring(1)},
             {token: "klab.number", foreground: "098658"},
             {token: "klab.string", foreground: "a31515"},
