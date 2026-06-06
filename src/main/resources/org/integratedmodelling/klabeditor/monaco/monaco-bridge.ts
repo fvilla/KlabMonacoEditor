@@ -298,7 +298,7 @@ function isCopyCutPaste(e: any) {
             {token: "klab.doccomment", foreground: "0000a0"},
             {token: "klab.operator", foreground: rgb("VALUE_OPERATOR").substring(1)},
             {token: "klab.number", foreground: "098658"},
-            {token: "klab.string", foreground: "a31515"},
+            {token: "klab.string", foreground: "014732"},
             {token: "klab.delimiter", foreground: "000000"}
         ];
 
@@ -347,9 +347,8 @@ function isCopyCutPaste(e: any) {
                     [/\/\*\*\*/, "klab.doccomment", "@doccomment"],
                     [/\/\*/, "klab.comment", "@comment"],
                     [/\/\/.*$/, "klab.comment"],
-                    [/"([^"\\]|\\.)*$/, "klab.string.invalid"],
                     [/"/, "klab.string", "@string_double"],
-                    [/'([^'\\]|\\.)*'/, "klab.string"],
+                    [/'/, "klab.string", "@string_single"],
                     [/\d*\.\d+([eE][\-+]?\d+)?[fFdD]?/, "klab.number.float"],
                     [/0[xX][0-9a-fA-F]+[lL]?/, "klab.number.hex"],
                     [/\d+[lL]?/, "klab.number"],
@@ -379,6 +378,12 @@ function isCopyCutPaste(e: any) {
                     [/@escapes/, "klab.string.escape"],
                     [/\\./, "klab.string.escape.invalid"],
                     [/"/, "klab.string", "@pop"]
+                ],
+                string_single: [
+                    [/[^\\']+/, "klab.string"],
+                    [/@escapes/, "klab.string.escape"],
+                    [/\\./, "klab.string.escape.invalid"],
+                    [/'/, "klab.string", "@pop"]
                 ],
                 groovy: [
                     [/[^\]]+/, ""],

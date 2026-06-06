@@ -16,6 +16,7 @@ import netscape.javascript.JSObject;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Range;
+import org.integratedmodelling.klab.api.exceptions.KlabIllegalArgumentException;
 import org.integratedmodelling.klabeditor.lsp.KlabLspService;
 
 import java.net.URL;
@@ -147,7 +148,7 @@ public class MonacoEditorView extends StackPane {
 
     public void setHighlighterServicePort(int port) {
         if (port <= 0 || port > 65535) {
-            throw new IllegalArgumentException("Invalid highlighter service port: " + port);
+            throw new KlabIllegalArgumentException("Invalid highlighter service port: " + port);
         }
         setHighlighterServiceUrl("http://localhost:" + port);
     }
@@ -443,8 +444,8 @@ public class MonacoEditorView extends StackPane {
         }
         preloadConceptHighlighterCache(KlabLspService.getInstance().getConceptCache());
 
-        System.out.println(
-                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" + theme);
+//        System.out.println(
+//                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" + theme);
 
         String js = "window.MonacoBridge && window.MonacoBridge.openDocument({" + "uri:" + jsString(
                 uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(

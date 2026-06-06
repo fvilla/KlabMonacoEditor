@@ -25,7 +25,7 @@ public class DiagnosticsService {
         byUri.put(uri, diagnostics);
         for (Listener l : listeners) {
             try {
-                System.out.println("[DiagnosticsService] notifying listener: " + l);
+//                System.out.println("[DiagnosticsService] notifying listener: " + l);
                 l.onDiagnosticsChanged(uri, diagnostics);
             } catch (Exception e) {
                 e.printStackTrace();

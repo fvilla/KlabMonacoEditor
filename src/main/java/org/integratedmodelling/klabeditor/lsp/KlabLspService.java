@@ -61,10 +61,12 @@ public class KlabLspService {
     }
 
     /**
-     * This MUST be called with a valid and running LSP server as the argument.
+     * This MUST be called with a valid and running LSP server as the argument. The scope is used to locate
+     * resources services and initialize the worldview bridge for the highlighting cache.
      * <p>
      * TODO switch to a regular class with a singleton check and pass the server as constructor argument
-     * TODO pass a scope and manage the language configuration and worldview bridge
+     * TODO persist the concept cache so that we can initialize the bridge with it if no services are available or
+     *      we don't want to use remote services for that.
      *
      * @param lspServer
      * @return
@@ -241,44 +243,4 @@ public class KlabLspService {
         return server.getTextDocumentService().completion(params);
     }
 
-    //  public void shutdown() throws Exception {
-    //    if (!initialized) return;
-    //    server.shutdown().get(5, TimeUnit.SECONDS);
-    //    server.exit();
-    //    serverProcess.destroy();
-    //    executor.shutdown();
-    //    initialized = false;
-    //  }
-    //
-    //  private Process startServerProcess(Path workspaceRoot) throws Exception {
-    //    // Location of "target/classes" relative to workspaceRoot
-    //    Path classesDir = workspaceRoot.resolve("target").resolve("classes");
-    //
-    //    // Load classpath.txt which the .sh script uses
-    //    Path cpFile = workspaceRoot.resolve("target").resolve("classpath.txt");
-    //    String extraCp = java.nio.file.Files.readString(cpFile).trim();
-    //
-    //    // Build the full classpath (classes + additional entries from classpath.txt)
-    //    // TODO change this to something production-ready
-    //    String classpath = classesDir.toString() + System.getProperty("path.separator") + extraCp;
-    //
-    //    // Build the Java command equivalent to start-lsp.sh
-    //    ProcessBuilder pb =
-    //        new ProcessBuilder(
-    //            "java",
-    //            "-Dxtext.disable.standalone.setup=true",
-    //            "org.eclipse.xtext.ide.server.ServerLauncher");
-    //
-    //    // put CLASSPATH in an env var so that the CL doesn't kill Windows
-    //    pb.environment().put("CLASSPATH", classpath);
-    //    pb.directory(workspaceRoot.toFile());
-    //    pb.redirectError(ProcessBuilder.Redirect.INHERIT);
-    //
-    //    return pb.start();
-    //  }
-
-    //  public static void main(String[] diocan) throws Exception {
-    //    Path workspaceRoot = Paths.get(System.getProperty("user.home") + "/git/klab-ide");
-    //    KlabLspService.getInstance().startIfNeeded(workspaceRoot);
-    //  }
 }
