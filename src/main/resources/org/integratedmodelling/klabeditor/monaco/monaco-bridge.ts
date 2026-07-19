@@ -25,6 +25,7 @@ interface MonacoBridgeApi {
     getText(): string;
 
     setCursorPosition(offset: number): void;
+    focusEditor(): void;
 
     setLineNumbers(show: boolean): void;
 
@@ -1224,6 +1225,15 @@ function isCopyCutPaste(e: any) {
                 }
                 try {
                     state.editor.revealPositionInCenter(pos);
+                } catch {
+                }
+            });
+        },
+
+        focusEditor() {
+            ensureReady(() => {
+                try {
+                    state.editor?.focus();
                 } catch {
                 }
             });

@@ -86,6 +86,7 @@ public class MonacoEditorView extends StackPane {
     private volatile boolean isDirty;
     private volatile String pendingDiagnosticsJson = null;
     private volatile Integer pendingCursorOffset = null;
+    private volatile boolean pendingEditorFocus = false;
     private volatile String pendingConceptHighlighterJson = null;
     private volatile String pendingKeywordHighlighterJson = null;
     private final Map<String, List<String>> pendingKeywordHighlighterCache = new HashMap<>();
@@ -558,6 +559,21 @@ public class MonacoEditorView extends StackPane {
         safeExec("window.MonacoBridge && window.MonacoBridge.setCursorPosition(" + offset + ");");
     }
 
+    /** Give keyboard focus to the embedded Monaco editor, replaying the request if it is still loading. */
+    public void requestEditorFocus() {
+        pendingEditorFocus = true;
+        replayPendingEditorFocus();
+    }
+
+    private void replayPendingEditorFocus() {
+        if (!pendingEditorFocus || !editorJsReady.get()) {
+            return;
+        }
+        pendingEditorFocus = false;
+        webView.requestFocus();
+        safeExec("window.MonacoBridge && window.MonacoBridge.focusEditor();");
+    }
+
     /**
      * Set a listener to be notified when the cursor position changes.
      *
@@ -708,6 +724,7 @@ public class MonacoEditorView extends StackPane {
             Platform.runLater(() -> {
                 initEditor(initialText, initialLanguage, initialTheme);
                 replayPendingCursorPosition();
+                replayPendingEditorFocus();
             });
 
             if (pendingDiagnosticsJson != null) {
