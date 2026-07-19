@@ -85,6 +85,7 @@ public class MonacoEditorView extends StackPane {
     private Consumer<Boolean> onDirtyChangedListener;
     private volatile boolean isDirty;
     private volatile String pendingDiagnosticsJson = null;
+    private volatile Integer pendingCursorOffset = null;
     private volatile String pendingConceptHighlighterJson = null;
     private volatile String pendingKeywordHighlighterJson = null;
     private final Map<String, List<String>> pendingKeywordHighlighterCache = new HashMap<>();
@@ -542,8 +543,19 @@ public class MonacoEditorView extends StackPane {
      * @param offset The character offset position where to place the cursor
      */
     public void setCursorPosition(int offset) {
-        String js = "window.MonacoBridge && window.MonacoBridge.setCursorPosition(" + offset + ");";
-        safeExec(js);
+        pendingCursorOffset = Math.max(0, offset);
+        if (editorJsReady.get()) {
+            replayPendingCursorPosition();
+        }
+    }
+
+    private void replayPendingCursorPosition() {
+        Integer offset = pendingCursorOffset;
+        if (offset == null) {
+            return;
+        }
+        pendingCursorOffset = null;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setCursorPosition(" + offset + ");");
     }
 
     /**
@@ -693,7 +705,10 @@ public class MonacoEditorView extends StackPane {
             // additional ready callbacks, and treating each one as a new initialization request can
             // recursively reopen the document.
             replayPendingHighlighterCaches();
-            Platform.runLater(() -> initEditor(initialText, initialLanguage, initialTheme));
+            Platform.runLater(() -> {
+                initEditor(initialText, initialLanguage, initialTheme);
+                replayPendingCursorPosition();
+            });
 
             if (pendingDiagnosticsJson != null) {
                 System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
