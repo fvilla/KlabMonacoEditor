@@ -29,7 +29,7 @@ class KlabLanguageClient implements LanguageClient {
                         + d.getRange().getStart()));
     List<Diagnostic> diagnostics = diagnosticsParams.getDiagnostics();
 
-    diagnosticsService.updateDiagnostics(uri, diagnostics);
+    diagnosticsService.updateDiagnostics(uri, diagnosticsParams.getVersion(), diagnostics);
   }
 
   @Override

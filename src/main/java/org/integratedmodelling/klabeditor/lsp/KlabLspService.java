@@ -49,6 +49,9 @@ public class KlabLspService {
     }
 
     public List<String> getLanguageKeywords(String language) {
+        if (languageConfig == null) {
+            return Collections.emptyList();
+        }
         var languageType = KlabLanguage.forId(language);
         if (languageType == null) {
             return Collections.emptyList();
@@ -146,6 +149,10 @@ public class KlabLspService {
         return server;
     }
 
+    public boolean isInitialized() {
+        return initialized;
+    }
+
     public Map<String, String> getConceptCache() {
         return conceptMap;
     }
@@ -170,11 +177,13 @@ public class KlabLspService {
 
         DidOpenTextDocumentParams params = new DidOpenTextDocumentParams(item);
         try {
+            DiagnosticsService.getInstance().documentOpened(uri, 1);
             server.getTextDocumentService().didOpen(params);
             System.out.println(
                     "[LSP] didOpen uri=" + uri + " version=1 len=" + (text != null ? text.length() : 0));
         } catch (Exception e) {
             docVersions.remove(uri);
+            DiagnosticsService.getInstance().documentClosed(uri);
             System.err.println("[LSP] didOpen failed uri=" + uri);
             e.printStackTrace();
         }
@@ -191,6 +200,7 @@ public class KlabLspService {
         }
 
         int v = nextVersion(uri);
+        DiagnosticsService.getInstance().documentChanged(uri, v);
 
         TextDocumentContentChangeEvent change = new TextDocumentContentChangeEvent();
         change.setText(newText); // full text
@@ -224,6 +234,7 @@ public class KlabLspService {
             e.printStackTrace();
         } finally {
             docVersions.remove(uri);
+            DiagnosticsService.getInstance().documentClosed(uri);
         }
     }
 

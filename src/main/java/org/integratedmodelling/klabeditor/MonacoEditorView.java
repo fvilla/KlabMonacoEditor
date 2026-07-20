@@ -725,13 +725,17 @@ public class MonacoEditorView extends StackPane {
                 initEditor(initialText, initialLanguage, initialTheme);
                 replayPendingCursorPosition();
                 replayPendingEditorFocus();
+                // initEditor and setDiagnostics both enqueue JavaScript work through safeExec. Keep
+                // them in this task and in this order so openDocument creates the Monaco model before
+                // markers are applied. Replaying diagnostics outside this task races ahead of model
+                // creation on the first load and silently drops the initial markers.
+                if (pendingDiagnosticsJson != null) {
+                    System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
+                    safeExec(
+                            "window.MonacoBridge && window.MonacoBridge.setDiagnostics(" +
+                                    pendingDiagnosticsJson + ");");
+                }
             });
-
-            if (pendingDiagnosticsJson != null) {
-                System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
-                safeExec(
-                        "window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
-            }
         }
 
         public void onCursorPositionChanged(int offset) {
