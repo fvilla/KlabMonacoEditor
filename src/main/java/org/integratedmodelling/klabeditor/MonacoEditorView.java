@@ -17,15 +17,13 @@ import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Range;
 import org.integratedmodelling.klab.api.exceptions.KlabIllegalArgumentException;
+import org.integratedmodelling.klab.api.services.runtime.Notification;
 import org.integratedmodelling.klabeditor.lsp.KlabLspService;
 
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -219,11 +217,8 @@ public class MonacoEditorView extends StackPane {
                 if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null) {
                     continue;
                 }
-                List<String> keywords = entry.getValue().stream()
-                        .filter(Objects::nonNull)
-                        .filter(keyword -> !keyword.isBlank())
-                        .distinct()
-                        .toList();
+                List<String> keywords = entry.getValue().stream().filter(Objects::nonNull).filter(
+                        keyword -> !keyword.isBlank()).distinct().toList();
                 if (!keywords.isEmpty()) {
                     sanitized.put(entry.getKey(), keywords);
                 }
@@ -306,10 +301,10 @@ public class MonacoEditorView extends StackPane {
     private void notifyBridgeIfAlreadyReady() {
         try {
             webEngine.executeScript("""
-                    window.MonacoBridge
-                    && window.MonacoBridge._notifyJavaReady
-                    && window.MonacoBridge._notifyJavaReady();
-                    """);
+                                            window.MonacoBridge
+                                            && window.MonacoBridge._notifyJavaReady
+                                            && window.MonacoBridge._notifyJavaReady();
+                                            """);
         } catch (Throwable t) {
             System.err.println(
                     "[MonacoEditorView] Failed to request JS ready notification: " + t.getMessage());
@@ -340,8 +335,7 @@ public class MonacoEditorView extends StackPane {
         }
         if (loadRetryCount >= MAX_LOAD_RETRIES) {
             System.err.println(
-                    "[MonacoEditorView] Monaco editor did not become ready after " + MAX_LOAD_RETRIES + " " +
-                            "retries — giving up.");
+                    "[MonacoEditorView] Monaco editor did not become ready after " + MAX_LOAD_RETRIES + " " + "retries — giving up.");
             return;
         }
         loadRetryCount++;
@@ -400,6 +394,29 @@ public class MonacoEditorView extends StackPane {
     }
 
     /**
+     * Convert notifications with a lexical context to markers.
+     *
+     * @param notifications
+     */
+    public void markNotifications(Collection<Notification> notifications) {
+        for (var n : notifications) {
+            if (n.getLexicalContext() != null) {
+                markNotification(n.getLexicalContext(), n.getLevel(), n.getMessage());
+            }
+        }
+    }
+
+    private void markNotification(Notification.LexicalContext lexicalContext, Notification.Level level,
+                                  String message) {
+        createMarkerByOffset(lexicalContext.getOffsetInDocument(), lexicalContext.getLength(), message,
+                             switch (level) {
+                                 case Debug, Info -> "info";
+                                 case Warning -> "warning";
+                                 case Error, SystemError -> "error";
+                             });
+    }
+
+    /**
      * Initialize the editor with provided content and configuration. This can be called multiple times;
      * subsequent calls will update the model text and language.
      */
@@ -418,7 +435,7 @@ public class MonacoEditorView extends StackPane {
             if (url != null) {
                 String base = url.toExternalForm();
                 String q = "?language=" + URLEncoder.encode(initialLanguage,
-                        StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
+                                                            StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
                         initialTheme, StandardCharsets.UTF_8) + "&highlighterServiceUrl=" + URLEncoder.encode(
                         highlighterServiceUrl, StandardCharsets.UTF_8) + "&text=" + URLEncoder.encode(
                         initialText, StandardCharsets.UTF_8);
@@ -438,16 +455,17 @@ public class MonacoEditorView extends StackPane {
 
     private void initEditor(String text, String language, String theme) {
 
-        String uri = (documentUri != null && !documentUri.isBlank()) ? documentUri : "inmemory:///untitled" +
-                                                                                     ".kim";
+        String uri = (documentUri != null && !documentUri.isBlank()) ? documentUri :
+                     "inmemory:///untitled" + ".kim";
         var keywords = KlabLspService.getInstance().getLanguageKeywords(language);
         if (keywords != null && !keywords.isEmpty()) {
             preloadKeywordHighlighterCache(language, keywords);
         }
         preloadConceptHighlighterCache(KlabLspService.getInstance().getConceptCache());
 
-//        System.out.println(
-//                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" + theme);
+        //        System.out.println(
+        //                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" +
+        //                theme);
 
         String js = "window.MonacoBridge && window.MonacoBridge.openDocument({" + "uri:" + jsString(
                 uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(
@@ -534,7 +552,7 @@ public class MonacoEditorView extends StackPane {
     public void createMarkerByOffset(int offset, int length, String message, String severity) {
         String js =
                 "window.MonacoBridge && window.MonacoBridge.createMarkerByOffset(" + offset + "," + length + "," + jsString(
-                        message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
+                message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
         safeExec(js);
     }
 
@@ -682,13 +700,11 @@ public class MonacoEditorView extends StackPane {
     private void replayPendingHighlighterCaches() {
         if (pendingConceptHighlighterJson != null) {
             safeExec(
-                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" +
-                            pendingConceptHighlighterJson + ");");
+                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + pendingConceptHighlighterJson + ");");
         }
         if (pendingKeywordHighlighterJson != null) {
             safeExec(
-                    "window.MonacoBridge && window.MonacoBridge.preloadKeywordHighlighterCache(" +
-                            pendingKeywordHighlighterJson + ");");
+                    "window.MonacoBridge && window.MonacoBridge.preloadKeywordHighlighterCache(" + pendingKeywordHighlighterJson + ");");
         }
     }
 
@@ -732,8 +748,7 @@ public class MonacoEditorView extends StackPane {
                 if (pendingDiagnosticsJson != null) {
                     System.out.println("[MonacoEditorView] Replaying pending diagnostics on editor ready");
                     safeExec(
-                            "window.MonacoBridge && window.MonacoBridge.setDiagnostics(" +
-                                    pendingDiagnosticsJson + ");");
+                            "window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
                 }
             });
         }
