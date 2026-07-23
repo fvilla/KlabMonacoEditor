@@ -301,10 +301,10 @@ public class MonacoEditorView extends StackPane {
     private void notifyBridgeIfAlreadyReady() {
         try {
             webEngine.executeScript("""
-                                            window.MonacoBridge
-                                            && window.MonacoBridge._notifyJavaReady
-                                            && window.MonacoBridge._notifyJavaReady();
-                                            """);
+                    window.MonacoBridge
+                    && window.MonacoBridge._notifyJavaReady
+                    && window.MonacoBridge._notifyJavaReady();
+                    """);
         } catch (Throwable t) {
             System.err.println(
                     "[MonacoEditorView] Failed to request JS ready notification: " + t.getMessage());
@@ -398,7 +398,10 @@ public class MonacoEditorView extends StackPane {
      *
      * @param notifications
      */
-    public void markNotifications(Collection<Notification> notifications) {
+    public void markNotifications(Collection<Notification> notifications, boolean clearMarkersBefore) {
+        if (clearMarkersBefore) {
+            clearMarkers();
+        }
         for (var n : notifications) {
             if (n.getLexicalContext() != null) {
                 markNotification(n.getLexicalContext(), n.getLevel(), n.getMessage());
@@ -409,11 +412,11 @@ public class MonacoEditorView extends StackPane {
     private void markNotification(Notification.LexicalContext lexicalContext, Notification.Level level,
                                   String message) {
         createMarkerByOffset(lexicalContext.getOffsetInDocument(), lexicalContext.getLength(), message,
-                             switch (level) {
-                                 case Debug, Info -> "info";
-                                 case Warning -> "warning";
-                                 case Error, SystemError -> "error";
-                             });
+                switch (level) {
+                    case Debug, Info -> "info";
+                    case Warning -> "warning";
+                    case Error, SystemError -> "error";
+                });
     }
 
     /**
@@ -435,7 +438,7 @@ public class MonacoEditorView extends StackPane {
             if (url != null) {
                 String base = url.toExternalForm();
                 String q = "?language=" + URLEncoder.encode(initialLanguage,
-                                                            StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
+                        StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
                         initialTheme, StandardCharsets.UTF_8) + "&highlighterServiceUrl=" + URLEncoder.encode(
                         highlighterServiceUrl, StandardCharsets.UTF_8) + "&text=" + URLEncoder.encode(
                         initialText, StandardCharsets.UTF_8);
@@ -456,7 +459,7 @@ public class MonacoEditorView extends StackPane {
     private void initEditor(String text, String language, String theme) {
 
         String uri = (documentUri != null && !documentUri.isBlank()) ? documentUri :
-                     "inmemory:///untitled" + ".kim";
+                "inmemory:///untitled" + ".kim";
         var keywords = KlabLspService.getInstance().getLanguageKeywords(language);
         if (keywords != null && !keywords.isEmpty()) {
             preloadKeywordHighlighterCache(language, keywords);
@@ -552,8 +555,17 @@ public class MonacoEditorView extends StackPane {
     public void createMarkerByOffset(int offset, int length, String message, String severity) {
         String js =
                 "window.MonacoBridge && window.MonacoBridge.createMarkerByOffset(" + offset + "," + length + "," + jsString(
-                message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
+                        message == null ? "" : message) + "," + jsString(severity == null ? "info" : severity) + ");";
         safeExec(js);
+    }
+
+    /**
+     * Remove all markers created through {@link #createMarker(int, String, String)} or
+     * {@link #createMarkerByOffset(int, int, String, String)} from the active document.
+     * Language-server diagnostics are managed separately and are not affected.
+     */
+    public void clearMarkers() {
+        safeExec("window.MonacoBridge && window.MonacoBridge.clearMarkers();");
     }
 
     /**
@@ -577,7 +589,9 @@ public class MonacoEditorView extends StackPane {
         safeExec("window.MonacoBridge && window.MonacoBridge.setCursorPosition(" + offset + ");");
     }
 
-    /** Give keyboard focus to the embedded Monaco editor, replaying the request if it is still loading. */
+    /**
+     * Give keyboard focus to the embedded Monaco editor, replaying the request if it is still loading.
+     */
     public void requestEditorFocus() {
         pendingEditorFocus = true;
         replayPendingEditorFocus();

@@ -36,6 +36,8 @@ interface MonacoBridgeApi {
 
     clearDiagnostics(): void;
 
+    clearMarkers(): void;
+
     createMarker(line: number, message: string, severity?: 'info' | 'warning' | 'error' | 'hint'): void;
 
     createMarkerByOffset(offset: number, length: number, message: string, severity?: 'info' | 'warning' | 'error' | 'hint'): void;
@@ -92,6 +94,7 @@ function isCopyCutPaste(e: any) {
 
 (function () {
     const OWNER_DIAGNOSTICS = "kim-lsp";
+    const OWNER_MARKERS = "java-bridge";
     const DEFAULT_HIGHLIGHTER_SERVICE_URL = "http://localhost:8765";
 
     type KlabLanguageName = "kim" | "kactor" | "worldview" | "observation";
@@ -262,6 +265,14 @@ function isCopyCutPaste(e: any) {
             default:
                 return monaco.MarkerSeverity.Info;
         }
+    }
+
+    function addMarker(model: any, marker: any) {
+        const markers = monaco.editor.getModelMarkers({
+            owner: OWNER_MARKERS,
+            resource: model.uri
+        });
+        monaco.editor.setModelMarkers(model, OWNER_MARKERS, [...markers, marker]);
     }
 
     function rgb(name: string): string {
@@ -1277,19 +1288,27 @@ function isCopyCutPaste(e: any) {
             });
         },
 
+        clearMarkers() {
+            ensureReady(() => {
+                const model = state.editor?.getModel?.();
+                if (!model) return;
+                monaco.editor.setModelMarkers(model, OWNER_MARKERS, []);
+            });
+        },
+
         createMarker(line: number, message: string, severity: 'info' | 'warning' | 'error' | 'hint' = 'info') {
             ensureReady(() => {
                 const model = state.editor?.getModel?.();
                 if (!model) return;
-                const markers = [{
+                const marker = {
                     startLineNumber: Math.max(1, Math.floor(line || 1)),
                     endLineNumber: Math.max(1, Math.floor(line || 1)),
                     startColumn: 1,
                     endColumn: 1,
                     message: message || '',
                     severity: toSeverity(severity)
-                }];
-                monaco.editor.setModelMarkers(model, 'java-bridge', markers);
+                };
+                addMarker(model, marker);
             });
         },
 
@@ -1299,15 +1318,15 @@ function isCopyCutPaste(e: any) {
                 if (!model) return;
                 const startPosition = model.getPositionAt(offset);
                 const endPosition = model.getPositionAt(offset + length);
-                const markers = [{
+                const marker = {
                     startLineNumber: startPosition.lineNumber,
                     endLineNumber: endPosition.lineNumber,
                     startColumn: startPosition.column,
                     endColumn: endPosition.column,
                     message: message || '',
                     severity: toSeverity(severity)
-                }];
-                monaco.editor.setModelMarkers(model, 'java-bridge', markers);
+                };
+                addMarker(model, marker);
             });
         },
 
