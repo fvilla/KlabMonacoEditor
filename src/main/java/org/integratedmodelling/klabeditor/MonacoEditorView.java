@@ -88,6 +88,8 @@ public class MonacoEditorView extends StackPane {
     private volatile String pendingConceptHighlighterJson = null;
     private volatile String pendingKeywordHighlighterJson = null;
     private final Map<String, List<String>> pendingKeywordHighlighterCache = new HashMap<>();
+    private final List<Runnable> editorRenderedCallbacks = new ArrayList<>();
+    private boolean editorRendered;
 
     // Memorize last requested init so we can re-apply if needed
     private String initialText = "";
@@ -285,6 +287,7 @@ public class MonacoEditorView extends StackPane {
             if (state == Worker.State.SUCCEEDED) {
                 pageLoaded.set(true);
                 editorJsReady.set(false); // Reset: JS must confirm readiness via onEditorReady()
+                resetEditorRendered();
                 window = (JSObject) webEngine.executeScript("window");
 
                 // Provide a Java connector object callable from JS: window.JavaBridge
@@ -429,6 +432,7 @@ public class MonacoEditorView extends StackPane {
         this.initialText = text == null ? "" : text;
         this.initialLanguage = language;
         this.initialTheme = theme;
+        resetEditorRendered();
         loadRetryCount = 0; // Explicit call from caller — reset retry budget
         if (webView.isDebug()) {
             // Build a classpath URL to index.html with query parameters so the external browser can
@@ -530,6 +534,45 @@ public class MonacoEditorView extends StackPane {
      */
     public void setOnDirtyChanged(Consumer<Boolean> onDirtyChanged) {
         this.onDirtyChangedListener = onDirtyChanged;
+    }
+
+    /**
+     * Run {@code callback} once the current document has been rendered by Monaco. Callbacks
+     * registered before the document is rendered are queued; callbacks registered afterwards
+     * run on the next JavaFX pulse.
+     *
+     * @param callback work to run on the JavaFX application thread
+     */
+    public void runAfterEditorRendered(Runnable callback) {
+        Objects.requireNonNull(callback, "callback");
+        synchronized (editorRenderedCallbacks) {
+            if (!editorRendered) {
+                editorRenderedCallbacks.add(callback);
+                return;
+            }
+        }
+        Platform.runLater(callback);
+    }
+
+    private void resetEditorRendered() {
+        synchronized (editorRenderedCallbacks) {
+            editorRendered = false;
+        }
+    }
+
+    private void notifyEditorRendered() {
+        List<Runnable> callbacks;
+        synchronized (editorRenderedCallbacks) {
+            if (editorRendered) {
+                return;
+            }
+            editorRendered = true;
+            callbacks = new ArrayList<>(editorRenderedCallbacks);
+            editorRenderedCallbacks.clear();
+        }
+        for (Runnable callback : callbacks) {
+            Platform.runLater(callback);
+        }
     }
 
     /**
@@ -765,6 +808,10 @@ public class MonacoEditorView extends StackPane {
                             "window.MonacoBridge && window.MonacoBridge.setDiagnostics(" + pendingDiagnosticsJson + ");");
                 }
             });
+        }
+
+        public void onEditorRendered() {
+            notifyEditorRendered();
         }
 
         public void onCursorPositionChanged(int offset) {

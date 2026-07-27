@@ -227,6 +227,24 @@ function isCopyCutPaste(e: any) {
         }
     }
 
+    function notifyJavaRendered(): void {
+        const notify = () => {
+            try {
+                (window as any).JavaBridge?.onEditorRendered?.();
+            } catch (e) {
+                logWarn("JavaBridge.onEditorRendered failed");
+            }
+        };
+
+        // The second frame runs after the browser has had an opportunity to paint the document.
+        const nextFrame = window.requestAnimationFrame;
+        if (nextFrame) {
+            nextFrame(() => nextFrame(notify));
+        } else {
+            window.setTimeout(notify, 0);
+        }
+    }
+
     function attachContentChanged(model: any) {
         try {
             if (state._contentDisposable?.dispose) {
@@ -1183,6 +1201,7 @@ function isCopyCutPaste(e: any) {
 
                     attachDirtyTracking(model);
                     scheduleSemanticHighlight();
+                    notifyJavaRendered();
 
                 } catch (e) {
                     logError("openDocument failed", e);
