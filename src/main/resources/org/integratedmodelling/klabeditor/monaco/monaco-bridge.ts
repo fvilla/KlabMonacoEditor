@@ -494,6 +494,10 @@ function isCopyCutPaste(e: any) {
                     monaco.editor.setModelLanguage(model, spec.id);
                 } catch {
                 }
+                try {
+                    model.forceTokenization?.(model.getLineCount?.() || 1);
+                } catch {
+                }
             }
         });
     }
@@ -1351,8 +1355,9 @@ function isCopyCutPaste(e: any) {
 
         configureHighlighter(serviceUrl: string) {
             state.highlighterServiceUrl = (serviceUrl || DEFAULT_HIGHLIGHTER_SERVICE_URL).replace(/\/+$/, "");
-            for (const key in keywordCache) delete keywordCache[key];
-            for (const key in conceptCategoryCache) delete conceptCategoryCache[key];
+            // A URL change must not discard metadata explicitly preloaded by Java. The HTTP
+            // highlighter is optional and, in the IDE, normally absent; clearing here used to turn
+            // a complete keyword cache into an empty result from a failed fetch.
             for (const key in urnStatusCache) delete urnStatusCache[key];
             const spec = state.activeLanguageSpec;
             if (spec) {
