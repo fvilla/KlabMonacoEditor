@@ -87,7 +87,7 @@ public class KlabLspService {
         try {
             LanguageClient client = new KlabLanguageClient();
 
-            this.languageConfig = scope.getService(ResourcesService.class).info("",
+            this.languageConfig = scope.getService(ResourcesService.class).info("klab.languages",
                     KlabAsset.KnowledgeClass.INFORMATION,
                     LanguageDescriptor.class,
                     scope);

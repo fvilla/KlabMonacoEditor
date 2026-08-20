@@ -152,6 +152,32 @@ function isCopyCutPaste(e: any) {
         SEMANTIC_MODIFIER: [0, 0, 0]
     };
 
+    // Keep the light palette above stable. These values are only used by the dark theme;
+    // each color preserves the hue of its light-theme counterpart while increasing contrast.
+    const DARK_COLOR_RGB: { [name: string]: number[] } = {
+        DOMAIN: [103, 232, 231],
+        CONFIGURATION: [92, 200, 200],
+        EVENT: [230, 214, 106],
+        EXTENT: [104, 217, 217],
+        PROCESS: [255, 133, 133],
+        QUALITY: [120, 224, 143],
+        RELATIONSHIP: [241, 207, 112],
+        TRAIT: [114, 174, 245],
+        ROLE: [115, 169, 237],
+        SUBJECT: [224, 160, 110],
+        LIVE_URN: [105, 201, 138],
+        INACTIVE_URN: [255, 229, 138],
+        ERROR: [255, 123, 123],
+        UNKNOWN: [196, 196, 196],
+        INACTIVE: [192, 192, 192],
+        VERSION: [112, 217, 217],
+        KEYWORD: [255, 157, 181],
+        VALUE_OPERATOR: [212, 212, 212],
+        UNARY_OPERATOR: [212, 212, 212],
+        BINARY_OPERATOR: [212, 212, 212],
+        SEMANTIC_MODIFIER: [212, 212, 212]
+    };
+
     const TOKEN_COLORS: { [token: string]: string } = {};
     const registeredLanguages: { [id: string]: boolean } = {};
     const keywordCache: { [name: string]: string[] } = {};
@@ -301,6 +327,14 @@ function isCopyCutPaste(e: any) {
         }).join("");
     }
 
+    function darkRgb(name: string): string {
+        const value = DARK_COLOR_RGB[(name || "").toUpperCase()] || DARK_COLOR_RGB.UNKNOWN;
+        return "#" + value.map((part) => {
+            const hex = Math.max(0, Math.min(255, part)).toString(16);
+            return hex.length === 1 ? "0" + hex : hex;
+        }).join("");
+    }
+
     function tokenName(name: string): string {
         return "klab-" + (name || "unknown").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     }
@@ -324,6 +358,8 @@ function isCopyCutPaste(e: any) {
     function installKlabTheme(baseTheme: string) {
         const rules: any[] = [
             {token: "klab.keyword", foreground: rgb("KEYWORD").substring(1), fontStyle: "bold"},
+            // Metadata keys are intentionally muted and must not inherit keyword styling.
+            {token: "klab.metadata", foreground: "808080"},
             {token: "klab.comment", foreground: "4ea64e", fontStyle: "italic"},
             {token: "klab.doccomment", foreground: "0000a0"},
             {token: "klab.operator", foreground: rgb("VALUE_OPERATOR").substring(1)},
@@ -338,6 +374,37 @@ function isCopyCutPaste(e: any) {
             rules.push({token, foreground: rgb(name).substring(1)});
         }
 
+        // Monarch appends tokenPostfix to emitted tokens. Keep an exact keyword rule
+        // after the generated category rules so keyword styling remains unambiguous.
+        rules.push({token: "klab.keyword.klab", foreground: rgb("KEYWORD").substring(1), fontStyle: "bold"});
+
+        const darkRules = rules.map((rule) => {
+            switch (rule.token) {
+                case "klab.keyword":
+                    return {...rule, foreground: darkRgb("KEYWORD").substring(1)};
+                case "klab.metadata":
+                    return {...rule, foreground: "b0b0b0"};
+                case "klab.comment":
+                    return {...rule, foreground: "7fd18b"};
+                case "klab.doccomment":
+                    return {...rule, foreground: "8fb4ff"};
+                case "klab.operator":
+                case "klab.delimiter":
+                    return {...rule, foreground: "d4d4d4"};
+                case "klab.number":
+                    return {...rule, foreground: "8bd5ff"};
+                case "klab.string":
+                    return {...rule, foreground: "a8e6a3"};
+                default:
+                    if (rule.token.indexOf("klab.klab-") === 0) {
+                        const colorName = rule.token.substring("klab.klab-".length).toUpperCase();
+                        return {...rule, foreground: darkRgb(colorName).substring(1)};
+                    }
+                    return rule;
+            }
+        });
+        darkRules.push({token: "klab.keyword.klab", foreground: darkRgb("KEYWORD").substring(1), fontStyle: "bold"});
+
         try {
             monaco.editor.defineTheme("klab-vs", {
                 base: "vs",
@@ -348,7 +415,7 @@ function isCopyCutPaste(e: any) {
             monaco.editor.defineTheme("klab-vs-dark", {
                 base: "vs-dark",
                 inherit: true,
-                rules,
+                rules: darkRules,
                 colors: {}
             });
         } catch (e) {
@@ -384,6 +451,8 @@ function isCopyCutPaste(e: any) {
                     [/\d+[lL]?/, "klab.number"],
                     [/[a-z]+(?:\.[a-z]+)*:[A-Z][A-Za-z0-9]*/, "klab." + tokenName("UNKNOWN")],
                     [/[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*(?:#[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?(?:,[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?)*)?/, "klab." + tokenName("UNKNOWN")],
+                    // Consume the complete metadata key before identifier/keyword rules run.
+                    [/[:+\-][a-z][a-z0-9_]*/, "klab.metadata"],
                     [/[a-zA-Z_$][\w$]*/, {cases: {"@keywords": "klab.keyword", "@default": "identifier"}}],
                     [/@symbols/, {cases: {"@operators": "klab.operator", "@default": ""}}],
                     [/\[/, "@brackets", "@groovy"],
@@ -570,11 +639,16 @@ function isCopyCutPaste(e: any) {
         for (const name in COLOR_RGB) {
             const color = rgb(name);
             css += `.monaco-editor .${tokenName(name)}{color:${color} !important;}`;
+            css += `.monaco-editor.vs-dark .${tokenName(name)}{color:${darkRgb(name)} !important;}`;
         }
         css += ".monaco-editor .klab-urn-online{color:#006600 !important;font-weight:bold;}";
         css += ".monaco-editor .klab-urn-offline{color:#606060 !important;font-weight:bold;}";
         css += ".monaco-editor .klab-urn-error{color:#ff0000 !important;}";
         css += ".monaco-editor .klab-urn-unknown{color:#808080 !important;font-style:italic;}";
+        css += ".monaco-editor.vs-dark .klab-urn-online{color:#69c98a !important;}";
+        css += ".monaco-editor.vs-dark .klab-urn-offline{color:#c0c0c0 !important;}";
+        css += ".monaco-editor.vs-dark .klab-urn-error{color:#ff7b7b !important;}";
+        css += ".monaco-editor.vs-dark .klab-urn-unknown{color:#c4c4c4 !important;}";
         style.textContent = css;
         document.head.appendChild(style);
     }
