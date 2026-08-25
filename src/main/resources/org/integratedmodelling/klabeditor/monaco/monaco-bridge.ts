@@ -452,7 +452,7 @@ function isCopyCutPaste(e: any) {
                     [/[a-z]+(?:\.[a-z]+)*:[A-Z][A-Za-z0-9]*/, "klab." + tokenName("UNKNOWN")],
                     [/[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*(?:#[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?(?:,[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?)*)?/, "klab." + tokenName("UNKNOWN")],
                     // Consume the complete metadata key before identifier/keyword rules run.
-                    [/[:+\-][a-z][a-z0-9_]*/, "klab.metadata"],
+                    [/[:+!][a-z][a-z0-9_]*/, "klab.metadata"],
                     [/[a-zA-Z_$][\w$]*/, {cases: {"@keywords": "klab.keyword", "@default": "identifier"}}],
                     [/@symbols/, {cases: {"@operators": "klab.operator", "@default": ""}}],
                     [/\[/, "@brackets", "@groovy"],
