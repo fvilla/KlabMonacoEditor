@@ -82,6 +82,7 @@ public class MonacoEditorView extends StackPane {
     private Consumer<String> onSaveListener;
     private Consumer<Boolean> onDirtyChangedListener;
     private Consumer<ReviewMarkerClick> reviewMarkerClickListener;
+    private Consumer<Integer> reviewMarginDoubleClickListener;
     private volatile boolean isDirty;
     private volatile String pendingDiagnosticsJson = null;
     private volatile Integer pendingCursorOffset = null;
@@ -515,13 +516,13 @@ public class MonacoEditorView extends StackPane {
     /**
      * A clickable marker displayed in Monaco's glyph margin while review mode is enabled.
      *
-     * @param id unique, stable marker identifier
-     * @param lineNumber one-based document line
-     * @param icon text glyph to display (for example "●", "?", or "✓")
-     * @param color any CSS color understood by the embedded browser
-     * @param size icon size in pixels (clamped to 8..32 by the JavaScript bridge)
-     * @param tooltip optional hover text
-     * @param action optional application-defined action identifier
+     * @param id             unique, stable marker identifier
+     * @param lineNumber     one-based document line
+     * @param icon           text glyph to display (for example "●", "?", or "✓")
+     * @param color          any CSS color understood by the embedded browser
+     * @param size           icon size in pixels (clamped to 8..32 by the JavaScript bridge)
+     * @param tooltip        optional hover text
+     * @param action         optional application-defined action identifier
      * @param responsibility optional application-defined owner or responsibility identifier
      */
     public record ReviewMarker(String id, int lineNumber, String icon, String color, int size,
@@ -545,8 +546,11 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    /** Information reported when a review marker is clicked. */
-    public record ReviewMarkerClick(String id, int lineNumber, String action, String responsibility) {}
+    /**
+     * Information reported when a review marker is clicked.
+     */
+    public record ReviewMarkerClick(String id, int lineNumber, String action, String responsibility) {
+    }
 
     /**
      * Enable or disable review mode. The glyph margin and its review markers are only visible while
@@ -561,7 +565,9 @@ public class MonacoEditorView extends StackPane {
         return reviewMode;
     }
 
-    /** Replace all review markers. Duplicate ids are rejected. */
+    /**
+     * Replace all review markers. Duplicate ids are rejected.
+     */
     public void setReviewMarkers(Collection<ReviewMarker> markers) {
         Objects.requireNonNull(markers, "markers");
         Map<String, ReviewMarker> replacement = new LinkedHashMap<>();
@@ -578,7 +584,9 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    /** Add or replace one review marker, identified by its id. */
+    /**
+     * Add or replace one review marker, identified by its id.
+     */
     public void putReviewMarker(ReviewMarker marker) {
         Objects.requireNonNull(marker, "marker");
         synchronized (reviewMarkers) {
@@ -587,7 +595,9 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    /** Remove one review marker by id. */
+    /**
+     * Remove one review marker by id.
+     */
     public void removeReviewMarker(String id) {
         if (id == null) return;
         synchronized (reviewMarkers) {
@@ -606,7 +616,9 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    /** Remove all configured review markers without changing review mode. */
+    /**
+     * Remove all configured review markers without changing review mode.
+     */
     public void clearReviewMarkers() {
         synchronized (reviewMarkers) {
             reviewMarkers.clear();
@@ -615,9 +627,20 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    /** Set the callback invoked on the JavaFX application thread when a review marker is clicked. */
+    /**
+     * Set the callback invoked on the JavaFX application thread when a review marker is clicked.
+     */
     public void setOnReviewMarkerClicked(Consumer<ReviewMarkerClick> listener) {
         reviewMarkerClickListener = listener;
+    }
+
+    /**
+     * Set the callback invoked when the user double-clicks an empty glyph-margin cell in review
+     * mode. The consumer receives the one-based document line number on the JavaFX application
+     * thread. Double-clicks directly on an existing review marker are excluded.
+     */
+    public void setOnReviewMarginDoubleClicked(Consumer<Integer> listener) {
+        reviewMarginDoubleClickListener = listener;
     }
 
     private void replayReviewMarkers() {
@@ -958,6 +981,13 @@ public class MonacoEditorView extends StackPane {
             if (listener != null) {
                 ReviewMarkerClick click = new ReviewMarkerClick(id, lineNumber, action, responsibility);
                 Platform.runLater(() -> listener.accept(click));
+            }
+        }
+
+        public void onReviewMarginDoubleClicked(int lineNumber) {
+            Consumer<Integer> listener = reviewMarginDoubleClickListener;
+            if (listener != null && lineNumber > 0) {
+                Platform.runLater(() -> listener.accept(lineNumber));
             }
         }
 

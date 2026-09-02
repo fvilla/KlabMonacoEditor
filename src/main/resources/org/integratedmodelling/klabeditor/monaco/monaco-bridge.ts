@@ -421,6 +421,23 @@ function isCopyCutPaste(e: any) {
                 }
                 element = element.parentElement;
             }
+
+            const mouseEvent = event?.event;
+            const clickCount = Number(mouseEvent?.detail ?? mouseEvent?.browserEvent?.detail ?? 1);
+            if (clickCount === 2) {
+                if (!marker) {
+                    const lineNumber = Number(event.target.position?.lineNumber ||
+                        event.target.range?.startLineNumber || 0);
+                    if (lineNumber > 0) {
+                        try {
+                            (window as any).JavaBridge?.onReviewMarginDoubleClicked?.(lineNumber);
+                        } catch (e) {
+                            logError('Review margin double-click callback failed', e);
+                        }
+                    }
+                }
+                return;
+            }
             if (!marker) return;
             try {
                 (window as any).JavaBridge?.onReviewMarkerClicked?.(

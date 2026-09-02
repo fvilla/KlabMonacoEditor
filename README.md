@@ -117,13 +117,18 @@ editor.setOnReviewMarkerClicked(click -> {
   openReviewAction(click.id(), click.action(), click.responsibility(), click.lineNumber());
 });
 
+editor.setOnReviewMarginDoubleClicked(lineNumber -> {
+  createReviewAt(lineNumber);
+});
+
 editor.setReviewMode(true);
 ```
 
 Marker ids are unique. `putReviewMarker` adds or replaces one marker, `removeReviewMarker` removes
 one, and `clearReviewMarkers` removes all of them. The icon is a text glyph, the color accepts CSS
 colors, and sizes are clamped to 8–32 pixels. Marker state survives review-mode toggles and editor
-initialization.
+initialization. The margin double-click callback only fires for empty glyph cells, not when the user
+double-clicks an existing marker.
 
 ## Use the editor with the k.LAB LSP service
 
