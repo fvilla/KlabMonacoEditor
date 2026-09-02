@@ -83,6 +83,12 @@ editor.setMinimapVisible(false);
 editor.setTheme("vs");
 ```
 
+The built-in <kbd>Ctrl</kbd>+<kbd>S</kbd>/<kbd>Cmd</kbd>+<kbd>S</kbd> command advances the dirty-state
+baseline before invoking `setOnSave`. If a toolbar button or another external action performs the
+save, call `editor.markSaved()` after persistence succeeds.
+For an asynchronous save, retain the submitted snapshot and call `editor.markSaved(savedText)` when
+that exact snapshot is confirmed; edits made while the request is in flight will remain dirty.
+
 Calls that affect Monaco can be made before its JavaScript bridge is ready; supported pending state
 is replayed when initialization completes.
 
@@ -97,7 +103,10 @@ public final class ProjectEditor extends MonacoEditorView {
   @Override
   protected Collection<BarComponent> createHeaderBarComponents() {
     Button save = new Button("Save");
-    save.setOnAction(event -> save(getText()));
+    save.setOnAction(event -> {
+      save(getText());
+      markSaved();
+    });
     return List.of(new BarComponent(save, BarSide.LEFT));
   }
 

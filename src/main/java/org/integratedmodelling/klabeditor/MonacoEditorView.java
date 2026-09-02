@@ -806,6 +806,24 @@ public class MonacoEditorView extends StackPane {
     }
 
     /**
+     * Establish the current contents as the saved baseline. Call this after a successful save
+     * initiated outside Monaco's built-in Ctrl/Cmd+S command, such as from a header-bar button.
+     */
+    public void markSaved() {
+        safeExec("window.MonacoBridge && window.MonacoBridge.markSaved();");
+    }
+
+    /**
+     * Establish a specific successfully persisted snapshot as the saved baseline. This overload is
+     * suitable for asynchronous saves: edits made while the save is in flight remain dirty.
+     */
+    public void markSaved(String savedText) {
+        String baseline = savedText == null ? "" : savedText;
+        initialText = baseline;
+        safeExec("window.MonacoBridge && window.MonacoBridge.markSaved(" + jsString(baseline) + ");");
+    }
+
+    /**
      * Set a callback to be invoked when the user triggers Save (Ctrl/Cmd+S) inside Monaco.
      * The full current text will be passed to the consumer.
      */
@@ -1112,9 +1130,15 @@ public class MonacoEditorView extends StackPane {
         }
 
         public void onSave(String text) {
+            String savedText = text == null ? "" : text;
+            initialText = savedText;
             if (onSaveListener != null) {
-                Platform.runLater(() -> onSaveListener.accept(text == null ? "" : text));
+                Platform.runLater(() -> onSaveListener.accept(savedText));
             }
+        }
+
+        public void onSavedBaselineChanged(String text) {
+            initialText = text == null ? "" : text;
         }
 
         public void onDirtyChanged(boolean dirty) {

@@ -26,6 +26,8 @@ interface MonacoBridgeApi {
 
     getText(): string;
 
+    markSaved(savedText?: string): void;
+
     setCursorPosition(offset: number): void;
     focusEditor(): void;
 
@@ -230,13 +232,14 @@ function isCopyCutPaste(e: any) {
         reviewMarkerByClass: { [className: string]: ReviewMarker },
         reviewStyleElement?: HTMLStyleElement | null,
         pendingCalls: Array<() => void>,
-        savedVersionId: number,
+        savedText: string,
         dirty: boolean,
         highlighterServiceUrl: string,
         activeLanguageSpec?: KlabLanguageSpec | null,
         semanticDecorationIds: string[],
         semanticScanTimer?: number | null,
         _contentDisposable?: any,
+        _dirtyDisposable?: any,
         _wheelNormalizerInstalled?: boolean,
         _currentUri?: any | null
     } = {
@@ -252,13 +255,14 @@ function isCopyCutPaste(e: any) {
         reviewMarkerByClass: {},
         reviewStyleElement: null,
         pendingCalls: [],
-        savedVersionId: 0,
+        savedText: '',
         dirty: false,
         highlighterServiceUrl: DEFAULT_HIGHLIGHTER_SERVICE_URL,
         activeLanguageSpec: null,
         semanticDecorationIds: [],
         semanticScanTimer: null,
         _contentDisposable: null as any,
+        _dirtyDisposable: null as any,
         _wheelNormalizerInstalled: false,
         _currentUri: null
     };
@@ -1083,17 +1087,13 @@ function isCopyCutPaste(e: any) {
                 try {
                     const model = state.editor.getModel?.();
                     const textNow = model ? (model.getValue?.() || '') : (state.editor.getValue?.() || '');
-                    (window as any).JavaBridge?.onSave?.(textNow);
-
                     if (model) {
-                        state.savedVersionId = model.getAlternativeVersionId();
-                        if (state.dirty) {
-                            state.dirty = false;
-                            (window as any).JavaBridge?.onDirtyChanged?.(false);
-                        }
+                        markModelSaved(model);
                     }
+                    // Advance the baseline before application code can inspect or modify the editor.
+                    (window as any).JavaBridge?.onSave?.(textNow);
                 } catch (e) {
-                    logError("Copy command failed", e);
+                    logError("Save command failed", e);
                 }
             });
         } catch (e) {
@@ -1303,19 +1303,33 @@ function isCopyCutPaste(e: any) {
         installWheelNormalizer();
     }
 
+    function notifyDirtyChanged(dirty: boolean) {
+        if (dirty === state.dirty) return;
+        state.dirty = dirty;
+        (window as any).JavaBridge?.onDirtyChanged?.(dirty);
+    }
+
+    function markModelSaved(model: any, savedText?: string) {
+        state.savedText = typeof savedText === 'string' ? savedText : (model.getValue?.() || '');
+        const currentText = model.getValue?.() || '';
+        notifyDirtyChanged(currentText !== state.savedText);
+        (window as any).JavaBridge?.onSavedBaselineChanged?.(state.savedText);
+    }
+
     function attachDirtyTracking(model: any) {
         try {
-            state.savedVersionId = model.getAlternativeVersionId();
-            state.dirty = false;
-            (window as any).JavaBridge?.onDirtyChanged?.(false);
+            if (state._dirtyDisposable?.dispose) {
+                state._dirtyDisposable.dispose();
+            }
+        } catch {
+        }
 
-            model.onDidChangeContent(() => {
-                const newVersion = model.getAlternativeVersionId();
-                const isDirty = newVersion !== state.savedVersionId;
-                if (isDirty !== state.dirty) {
-                    state.dirty = isDirty;
-                    (window as any).JavaBridge?.onDirtyChanged?.(isDirty);
-                }
+        try {
+            markModelSaved(model);
+
+            state._dirtyDisposable = model.onDidChangeContent(() => {
+                const isDirty = (model.getValue?.() || '') !== state.savedText;
+                notifyDirtyChanged(isDirty);
             });
         } catch {
         }
@@ -1455,11 +1469,7 @@ function isCopyCutPaste(e: any) {
                 model.setValue(text || '');
 
                 // programmatic set => reset dirty baseline
-                state.savedVersionId = model.getAlternativeVersionId();
-                if (state.dirty) {
-                    state.dirty = false;
-                    (window as any).JavaBridge?.onDirtyChanged?.(false);
-                }
+                markModelSaved(model);
             });
         },
 
@@ -1507,6 +1517,13 @@ function isCopyCutPaste(e: any) {
 
         isLineNumbersVisible(): boolean {
             return !!state.showLineNumbers;
+        },
+
+        markSaved(savedText?: string) {
+            ensureReady(() => {
+                const model = state.editor?.getModel?.();
+                if (model) markModelSaved(model, savedText);
+            });
         },
 
         setMinimapVisible(show: boolean) {
