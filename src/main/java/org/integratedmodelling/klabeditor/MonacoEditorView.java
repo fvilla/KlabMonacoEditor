@@ -9,6 +9,10 @@ import javafx.concurrent.Worker;
 import javafx.scene.Node;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
 import javafx.util.Duration;
@@ -59,6 +63,9 @@ public class MonacoEditorView extends StackPane {
 
     private final DebugWebView webView = new DebugWebView(false);
     private final WebEngine webEngine = webView.getEngine();
+    private final BorderPane editorLayout = new BorderPane();
+    private final EnumMap<EditorBar, BarLayout> bars = new EnumMap<>(EditorBar.class);
+    private boolean barsConfigured;
 
     private final AtomicBoolean pageLoaded = new AtomicBoolean(false);
     /**
@@ -100,6 +107,8 @@ public class MonacoEditorView extends StackPane {
     private String initialText = "";
     private String initialLanguage = "plaintext";
     private String initialTheme = "vs-dark";
+    private boolean showLineNumbers = true;
+    private boolean showMinimap = true;
     private String highlighterServiceUrl = "http://localhost:8765";
 
     private Consumer<String> changeListener;
@@ -118,12 +127,19 @@ public class MonacoEditorView extends StackPane {
 
     public MonacoEditorView(String documentUri, Consumer<String> saveCallback) {
         this.documentUri = documentUri;
-        getChildren().add(webView);
+        getStyleClass().add("monaco-editor-view");
+        URL stylesheet = MonacoEditorView.class.getResource(
+                "/org/integratedmodelling/klabeditor/monaco-editor-view.css");
+        if (stylesheet != null) {
+            getStylesheets().add(stylesheet.toExternalForm());
+        }
+
+        editorLayout.setCenter(webView);
+        getChildren().add(editorLayout);
         setPrefSize(800, 600);
 
-        // Ensure WebView fills the container
-        webView.setPrefSize(RegionU.width(this), RegionU.height(this));
-        RegionU.bindToParent(this, webView);
+        // BorderPane allocates all space not used by optional bars to the WebView.
+        webView.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
 
         // Expose a Java connector for callbacks from JS
         webEngine.getLoadWorker().stateProperty().addListener(pageLoadListener());
@@ -147,6 +163,111 @@ public class MonacoEditorView extends StackPane {
                 webEngine.load(url.toExternalForm());
             }
         }
+    }
+
+    /** The two optional component bars surrounding the editor. */
+    public enum EditorBar {
+        HEADER, STATUS
+    }
+
+    /** Horizontal placement of a component within an editor bar. */
+    public enum BarSide {
+        LEFT, RIGHT
+    }
+
+    /**
+     * A fully initialized JavaFX node and its placement within a bar.
+     *
+     * @param node component to install; a node can belong to only one JavaFX parent
+     * @param side side on which the component is aligned
+     */
+    public record BarComponent(Node node, BarSide side) {
+        public BarComponent {
+            Objects.requireNonNull(node, "node");
+            Objects.requireNonNull(side, "side");
+        }
+    }
+
+    /**
+     * Components to install in the top bar. Subclasses may override this callback; returning an
+     * empty collection keeps the header bar absent.
+     */
+    protected Collection<BarComponent> createHeaderBarComponents() {
+        return List.of();
+    }
+
+    /**
+     * Components to install in the bottom bar. Subclasses may override this callback; returning an
+     * empty collection keeps the status bar absent.
+     */
+    protected Collection<BarComponent> createStatusBarComponents() {
+        return List.of();
+    }
+
+    /**
+     * Install a component in either bar. This may be called by bar-definition callbacks or later on
+     * the JavaFX application thread. The requested bar is created lazily.
+     */
+    protected final void installBarComponent(EditorBar bar, BarComponent component) {
+        Objects.requireNonNull(bar, "bar");
+        Objects.requireNonNull(component, "component");
+        if (!Platform.isFxApplicationThread()) {
+            throw new IllegalStateException("Editor bar components must be installed on the JavaFX thread");
+        }
+
+        BarLayout layout = bars.computeIfAbsent(bar, this::createBar);
+        HBox target = component.side() == BarSide.LEFT ? layout.left() : layout.right();
+        target.getChildren().add(component.node());
+    }
+
+    private BarLayout createBar(EditorBar bar) {
+        HBox left = new HBox();
+        HBox right = new HBox();
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox container = new HBox(left, spacer, right);
+        container.getStyleClass().addAll("monaco-editor-bar",
+                bar == EditorBar.HEADER ? "monaco-editor-header-bar" : "monaco-editor-status-bar");
+        left.getStyleClass().addAll("monaco-editor-bar-section", "left");
+        right.getStyleClass().addAll("monaco-editor-bar-section", "right");
+
+        if (bar == EditorBar.HEADER) {
+            editorLayout.setTop(container);
+        } else {
+            editorLayout.setBottom(container);
+        }
+        return new BarLayout(left, right);
+    }
+
+    private void configureBars() {
+        if (barsConfigured) {
+            return;
+        }
+        barsConfigured = true;
+        installBarComponents(EditorBar.HEADER, createHeaderBarComponents());
+        installBarComponents(EditorBar.STATUS, createStatusBarComponents());
+    }
+
+    private void installBarComponents(EditorBar bar, Collection<BarComponent> components) {
+        if (components == null) {
+            return;
+        }
+        for (BarComponent component : components) {
+            installBarComponent(bar, Objects.requireNonNull(component,
+                    "Bar component collections must not contain null"));
+        }
+    }
+
+    @Override
+    protected void layoutChildren() {
+        // The first layout happens after subclass construction, avoiding overridable callbacks from
+        // the MonacoEditorView constructor.
+        configureBars();
+        super.layoutChildren();
+    }
+
+    private record BarLayout(HBox left, HBox right) {
     }
 
     public String getDocumentUri() {
@@ -481,7 +602,8 @@ public class MonacoEditorView extends StackPane {
 
         String js = "window.MonacoBridge && window.MonacoBridge.openDocument({" + "uri:" + jsString(
                 uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(
-                theme) + "," + "highlighterServiceUrl:" + jsString(
+                theme) + "," + "showLineNumbers:" + showLineNumbers + "," + "minimapVisible:" +
+                showMinimap + "," + "highlighterServiceUrl:" + jsString(
                 highlighterServiceUrl) + "," + "text:" + jsString(text) + "});";
 
         safeExec(js);
@@ -500,6 +622,7 @@ public class MonacoEditorView extends StackPane {
      * Toggle line number visibility.
      */
     public void setLineNumbers(boolean show) {
+        showLineNumbers = show;
         safeExec("window.MonacoBridge && window.MonacoBridge.setLineNumbers(" + show + ");");
     }
 
@@ -507,10 +630,32 @@ public class MonacoEditorView extends StackPane {
      * Query current line numbers visibility. Defaults to true if unknown.
      */
     public boolean isLineNumbersVisible() {
-        Object result = safeEval(
-                "(window.MonacoBridge && window.MonacoBridge.isLineNumbersVisible) ? window.MonacoBridge" + ".isLineNumbersVisible() : true");
-        if (result instanceof Boolean b) return b;
-        return true;
+        return showLineNumbers;
+    }
+
+    /** Change the active Monaco theme without recreating the document model. */
+    public void setTheme(String theme) {
+        if (theme == null || theme.isBlank()) {
+            throw new IllegalArgumentException("Monaco theme must not be blank");
+        }
+        initialTheme = theme;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setTheme(" + jsString(theme) + ");");
+    }
+
+    /** Return the last theme requested through {@link #loadEditor} or {@link #setTheme}. */
+    public String getTheme() {
+        return initialTheme;
+    }
+
+    /** Toggle Monaco's document minimap. */
+    public void setMinimapVisible(boolean show) {
+        showMinimap = show;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setMinimapVisible(" + show + ");");
+    }
+
+    /** Return the requested minimap visibility, including requests made before Monaco was ready. */
+    public boolean isMinimapVisible() {
+        return showMinimap;
     }
 
     /**
@@ -936,6 +1081,10 @@ public class MonacoEditorView extends StackPane {
             replayPendingHighlighterCaches();
             Platform.runLater(() -> {
                 initEditor(initialText, initialLanguage, initialTheme);
+                safeExec("window.MonacoBridge && window.MonacoBridge.setLineNumbers(" +
+                        showLineNumbers + ");");
+                safeExec("window.MonacoBridge && window.MonacoBridge.setMinimapVisible(" +
+                        showMinimap + ");");
                 safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMode(" + reviewMode + ");");
                 replayReviewMarkers();
                 replayPendingCursorPosition();
@@ -1028,19 +1177,4 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    // Small utility to ensure WebView tracks parent size without external CSS
-    private static final class RegionU {
-        static double width(Node n) {
-            return 800;
-        }
-
-        static double height(Node n) {
-            return 600;
-        }
-
-        static void bindToParent(StackPane parent, DebugWebView child) {
-            child.prefWidthProperty().bind(parent.widthProperty());
-            child.prefHeightProperty().bind(parent.heightProperty());
-        }
-    }
 }

@@ -79,10 +79,40 @@ String currentText = editor.getText();
 editor.setCursorPosition(characterOffset);
 editor.requestEditorFocus();
 editor.setLineNumbers(false);
+editor.setMinimapVisible(false);
+editor.setTheme("vs");
 ```
 
 Calls that affect Monaco can be made before its JavaScript bridge is ready; supported pending state
 is replayed when initialization completes.
+
+### Add optional command and status bars
+
+Subclass the editor and return fully initialized JavaFX nodes for either side of the top or bottom
+bar. A bar is not created when its callback returns no components, so the base editor retains its
+original borderless appearance.
+
+```java
+public final class ProjectEditor extends MonacoEditorView {
+  @Override
+  protected Collection<BarComponent> createHeaderBarComponents() {
+    Button save = new Button("Save");
+    save.setOnAction(event -> save(getText()));
+    return List.of(new BarComponent(save, BarSide.LEFT));
+  }
+
+  @Override
+  protected Collection<BarComponent> createStatusBarComponents() {
+    Label status = new Label("Ready");
+    return List.of(new BarComponent(status, BarSide.RIGHT));
+  }
+}
+```
+
+For components created after the callbacks run, subclasses can call
+`installBarComponent(EditorBar.STATUS, new BarComponent(node, BarSide.LEFT))` on the JavaFX thread.
+The bars use AtlantaFX semantic color lookups and otherwise leave child-control styling to the
+active application theme.
 
 ### Show diagnostics without LSP
 

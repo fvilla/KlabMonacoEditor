@@ -10,6 +10,8 @@ interface MonacoOpenDoc {
     text: string;
     language?: string;
     theme?: string;
+    showLineNumbers?: boolean;
+    minimapVisible?: boolean;
     highlighterServiceUrl?: string;
 }
 
@@ -30,6 +32,14 @@ interface MonacoBridgeApi {
     setLineNumbers(show: boolean): void;
 
     isLineNumbersVisible(): boolean;
+
+    setMinimapVisible(show: boolean): void;
+
+    isMinimapVisible(): boolean;
+
+    setTheme(theme: string): void;
+
+    getTheme(): string;
 
     setReviewMode(enabled: boolean): void;
 
@@ -212,6 +222,8 @@ function isCopyCutPaste(e: any) {
         container: HTMLElement | null,
         ready: boolean,
         showLineNumbers: boolean,
+        showMinimap: boolean,
+        theme: string,
         reviewMode: boolean,
         reviewMarkers: ReviewMarker[],
         reviewDecorationIds: string[],
@@ -232,6 +244,8 @@ function isCopyCutPaste(e: any) {
         container: null,
         ready: false,
         showLineNumbers: true,
+        showMinimap: true,
+        theme: 'vs-dark',
         reviewMode: false,
         reviewMarkers: [],
         reviewDecorationIds: [],
@@ -1024,6 +1038,7 @@ function isCopyCutPaste(e: any) {
             theme: theme || 'vs-dark',
             automaticLayout: true,
             lineNumbers: state.showLineNumbers ? 'on' : 'off',
+            minimap: {enabled: state.showMinimap},
             glyphMargin: state.reviewMode,
             mouseWheelScrollSensitivity: 1,
             fastScrollSensitivity: 1,
@@ -1346,6 +1361,13 @@ function isCopyCutPaste(e: any) {
 
                     let language = doc.language || 'plaintext';
                     const theme = doc.theme || 'vs-dark';
+                    state.theme = theme;
+                    if (typeof doc.showLineNumbers === 'boolean') {
+                        state.showLineNumbers = doc.showLineNumbers;
+                    }
+                    if (typeof doc.minimapVisible === 'boolean') {
+                        state.showMinimap = doc.minimapVisible;
+                    }
                     const spec = normalizeLanguage(language);
                     state.activeLanguageSpec = spec;
                     if (spec) {
@@ -1485,6 +1507,33 @@ function isCopyCutPaste(e: any) {
 
         isLineNumbersVisible(): boolean {
             return !!state.showLineNumbers;
+        },
+
+        setMinimapVisible(show: boolean) {
+            state.showMinimap = !!show;
+            ensureReady(() => {
+                if (state.editor) state.editor.updateOptions({minimap: {enabled: state.showMinimap}});
+            });
+        },
+
+        isMinimapVisible(): boolean {
+            return !!state.showMinimap;
+        },
+
+        setTheme(theme: string) {
+            if (!theme) return;
+            state.theme = theme;
+            ensureReady(() => {
+                try {
+                    monaco.editor.setTheme(state.activeLanguageSpec ? klabThemeName(theme) : theme);
+                } catch (e) {
+                    logWarn(`Failed to set theme ${theme}`);
+                }
+            });
+        },
+
+        getTheme(): string {
+            return state.theme;
         },
 
         setReviewMode(enabled: boolean) {
