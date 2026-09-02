@@ -81,12 +81,16 @@ public class MonacoEditorView extends StackPane {
     private Consumer<Integer> cursorPositionListener;
     private Consumer<String> onSaveListener;
     private Consumer<Boolean> onDirtyChangedListener;
+    private Consumer<ReviewMarkerClick> reviewMarkerClickListener;
     private volatile boolean isDirty;
     private volatile String pendingDiagnosticsJson = null;
     private volatile Integer pendingCursorOffset = null;
     private volatile boolean pendingEditorFocus = false;
     private volatile String pendingConceptHighlighterJson = null;
     private volatile String pendingKeywordHighlighterJson = null;
+    private volatile String pendingReviewMarkersJson = "[]";
+    private volatile boolean reviewMode;
+    private final Map<String, ReviewMarker> reviewMarkers = new LinkedHashMap<>();
     private final Map<String, List<String>> pendingKeywordHighlighterCache = new HashMap<>();
     private final List<Runnable> editorRenderedCallbacks = new ArrayList<>();
     private boolean editorRendered;
@@ -508,6 +512,119 @@ public class MonacoEditorView extends StackPane {
         return true;
     }
 
+    /**
+     * A clickable marker displayed in Monaco's glyph margin while review mode is enabled.
+     *
+     * @param id unique, stable marker identifier
+     * @param lineNumber one-based document line
+     * @param icon text glyph to display (for example "●", "?", or "✓")
+     * @param color any CSS color understood by the embedded browser
+     * @param size icon size in pixels (clamped to 8..32 by the JavaScript bridge)
+     * @param tooltip optional hover text
+     * @param action optional application-defined action identifier
+     * @param responsibility optional application-defined owner or responsibility identifier
+     */
+    public record ReviewMarker(String id, int lineNumber, String icon, String color, int size,
+                               String tooltip, String action, String responsibility) {
+        public ReviewMarker(String id, int lineNumber, String icon, String color, int size,
+                            String tooltip) {
+            this(id, lineNumber, icon, color, size, tooltip, null, null);
+        }
+
+        public ReviewMarker(String id, int lineNumber) {
+            this(id, lineNumber, "●", "#4f8cff", 16, null, null, null);
+        }
+
+        public ReviewMarker {
+            if (id == null || id.isBlank()) {
+                throw new IllegalArgumentException("Review marker id must not be blank");
+            }
+            if (lineNumber < 1) {
+                throw new IllegalArgumentException("Review marker lineNumber must be at least 1");
+            }
+        }
+    }
+
+    /** Information reported when a review marker is clicked. */
+    public record ReviewMarkerClick(String id, int lineNumber, String action, String responsibility) {}
+
+    /**
+     * Enable or disable review mode. The glyph margin and its review markers are only visible while
+     * review mode is enabled; configured markers are retained when it is disabled.
+     */
+    public void setReviewMode(boolean enabled) {
+        reviewMode = enabled;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMode(" + enabled + ");");
+    }
+
+    public boolean isReviewMode() {
+        return reviewMode;
+    }
+
+    /** Replace all review markers. Duplicate ids are rejected. */
+    public void setReviewMarkers(Collection<ReviewMarker> markers) {
+        Objects.requireNonNull(markers, "markers");
+        Map<String, ReviewMarker> replacement = new LinkedHashMap<>();
+        for (ReviewMarker marker : markers) {
+            Objects.requireNonNull(marker, "markers must not contain null");
+            if (replacement.putIfAbsent(marker.id(), marker) != null) {
+                throw new IllegalArgumentException("Duplicate review marker id: " + marker.id());
+            }
+        }
+        synchronized (reviewMarkers) {
+            reviewMarkers.clear();
+            reviewMarkers.putAll(replacement);
+            serializeAndReplayReviewMarkers();
+        }
+    }
+
+    /** Add or replace one review marker, identified by its id. */
+    public void putReviewMarker(ReviewMarker marker) {
+        Objects.requireNonNull(marker, "marker");
+        synchronized (reviewMarkers) {
+            reviewMarkers.put(marker.id(), marker);
+            serializeAndReplayReviewMarkers();
+        }
+    }
+
+    /** Remove one review marker by id. */
+    public void removeReviewMarker(String id) {
+        if (id == null) return;
+        synchronized (reviewMarkers) {
+            if (reviewMarkers.remove(id) != null) {
+                serializeAndReplayReviewMarkers();
+            }
+        }
+    }
+
+    private void serializeAndReplayReviewMarkers() {
+        try {
+            pendingReviewMarkersJson = new ObjectMapper().writeValueAsString(reviewMarkers.values());
+            replayReviewMarkers();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Could not serialize review markers", e);
+        }
+    }
+
+    /** Remove all configured review markers without changing review mode. */
+    public void clearReviewMarkers() {
+        synchronized (reviewMarkers) {
+            reviewMarkers.clear();
+            pendingReviewMarkersJson = "[]";
+            safeExec("window.MonacoBridge && window.MonacoBridge.clearReviewMarkers();");
+        }
+    }
+
+    /** Set the callback invoked on the JavaFX application thread when a review marker is clicked. */
+    public void setOnReviewMarkerClicked(Consumer<ReviewMarkerClick> listener) {
+        reviewMarkerClickListener = listener;
+    }
+
+    private void replayReviewMarkers() {
+        safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMarkers(" +
+                pendingReviewMarkersJson + ");");
+    }
+
 
     /**
      * Get current text content from the editor.
@@ -796,6 +913,8 @@ public class MonacoEditorView extends StackPane {
             replayPendingHighlighterCaches();
             Platform.runLater(() -> {
                 initEditor(initialText, initialLanguage, initialTheme);
+                safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMode(" + reviewMode + ");");
+                replayReviewMarkers();
                 replayPendingCursorPosition();
                 replayPendingEditorFocus();
                 // initEditor and setDiagnostics both enqueue JavaScript work through safeExec. Keep
@@ -830,6 +949,15 @@ public class MonacoEditorView extends StackPane {
             isDirty = dirty;
             if (onDirtyChangedListener != null) {
                 Platform.runLater(() -> onDirtyChangedListener.accept(dirty));
+            }
+        }
+
+        public void onReviewMarkerClicked(String id, int lineNumber, String action,
+                                          String responsibility) {
+            Consumer<ReviewMarkerClick> listener = reviewMarkerClickListener;
+            if (listener != null) {
+                ReviewMarkerClick click = new ReviewMarkerClick(id, lineNumber, action, responsibility);
+                Platform.runLater(() -> listener.accept(click));
             }
         }
 

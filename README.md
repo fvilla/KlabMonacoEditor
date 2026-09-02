@@ -99,6 +99,32 @@ editor.createMarker(4, "Check this statement", "warning");
 editor.createMarkerByOffset(120, 8, "Unknown identifier", "error");
 ```
 
+### Add clickable review markers
+
+Review markers use Monaco's glyph margin, the column to the left of line numbers. The margin and
+markers are hidden unless review mode is enabled:
+
+```java
+editor.setReviewMarkers(List.of(
+    new MonacoEditorView.ReviewMarker(
+        "comment-42", 4, "!", "#e67e22", 18,
+        "Architecture review", "open-comment", "platform-team"),
+    new MonacoEditorView.ReviewMarker(
+        "approval-7", 12, "✓", "seagreen", 16,
+        "Approved", "show-approval", "maria")));
+
+editor.setOnReviewMarkerClicked(click -> {
+  openReviewAction(click.id(), click.action(), click.responsibility(), click.lineNumber());
+});
+
+editor.setReviewMode(true);
+```
+
+Marker ids are unique. `putReviewMarker` adds or replaces one marker, `removeReviewMarker` removes
+one, and `clearReviewMarkers` removes all of them. The icon is a text glyph, the color accepts CSS
+colors, and sizes are clamped to 8–32 pixels. Marker state survives review-mode toggles and editor
+initialization.
+
 ## Use the editor with the k.LAB LSP service
 
 `KlabLspService` is a process bridge for a running k.LAB language-server `LocalInstance`. Initialize

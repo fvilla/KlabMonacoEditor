@@ -31,6 +31,14 @@ interface MonacoBridgeApi {
 
     isLineNumbersVisible(): boolean;
 
+    setReviewMode(enabled: boolean): void;
+
+    isReviewMode(): boolean;
+
+    setReviewMarkers(markers: ReviewMarker[]): void;
+
+    clearReviewMarkers(): void;
+
     // Diagnostics API (replaces window.kim_setDiagnostics)
     setDiagnostics(markers: any[]): void;
 
@@ -52,6 +60,17 @@ interface MonacoBridgeApi {
     _onAmdReady(container: HTMLElement): void;
 
     _notifyJavaReady(): boolean;
+}
+
+interface ReviewMarker {
+    id: string;
+    lineNumber: number;
+    icon?: string;
+    color?: string;
+    size?: number;
+    tooltip?: string;
+    action?: string;
+    responsibility?: string;
 }
 
 function logError(context: string, e: any) {
@@ -193,6 +212,11 @@ function isCopyCutPaste(e: any) {
         container: HTMLElement | null,
         ready: boolean,
         showLineNumbers: boolean,
+        reviewMode: boolean,
+        reviewMarkers: ReviewMarker[],
+        reviewDecorationIds: string[],
+        reviewMarkerByClass: { [className: string]: ReviewMarker },
+        reviewStyleElement?: HTMLStyleElement | null,
         pendingCalls: Array<() => void>,
         savedVersionId: number,
         dirty: boolean,
@@ -208,6 +232,11 @@ function isCopyCutPaste(e: any) {
         container: null,
         ready: false,
         showLineNumbers: true,
+        reviewMode: false,
+        reviewMarkers: [],
+        reviewDecorationIds: [],
+        reviewMarkerByClass: {},
+        reviewStyleElement: null,
         pendingCalls: [],
         savedVersionId: 0,
         dirty: false,
@@ -317,6 +346,89 @@ function isCopyCutPaste(e: any) {
             resource: model.uri
         });
         monaco.editor.setModelMarkers(model, OWNER_MARKERS, [...markers, marker]);
+    }
+
+    function cssColor(value?: string): string {
+        const fallback = '#4f8cff';
+        if (!value) return fallback;
+        try {
+            const probe = document.createElement('span');
+            probe.style.color = '';
+            probe.style.color = value;
+            return probe.style.color || fallback;
+        } catch {
+            return fallback;
+        }
+    }
+
+    function cssString(value: string): string {
+        return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+            .replace(/\r/g, '').replace(/\n/g, '\\A ') + '"';
+    }
+
+    function reviewClass(index: number): string {
+        return `klab-review-marker-${index}`;
+    }
+
+    function renderReviewMarkers(): void {
+        if (!state.editor) return;
+
+        const previous = state.reviewDecorationIds;
+        state.reviewMarkerByClass = {};
+        const decorations: any[] = [];
+        const rules: string[] = [];
+
+        if (state.reviewMode) {
+            const model = state.editor.getModel?.();
+            const lastLine = Math.max(1, model?.getLineCount?.() || 1);
+            state.reviewMarkers.forEach((marker, index) => {
+                const className = reviewClass(index);
+                const size = Math.max(8, Math.min(32, Math.floor(Number(marker.size) || 16)));
+                const icon = marker.icon == null || marker.icon === '' ? '●' : String(marker.icon);
+                state.reviewMarkerByClass[className] = marker;
+                rules.push(`.${className}::before{content:${cssString(icon)};color:${cssColor(marker.color)};font-size:${size}px;line-height:1;}`);
+                decorations.push({
+                    range: new monaco.Range(Math.min(marker.lineNumber, lastLine), 1,
+                        Math.min(marker.lineNumber, lastLine), 1),
+                    options: {
+                        isWholeLine: true,
+                        glyphMarginClassName: `klab-review-marker ${className}`,
+                        glyphMarginHoverMessage: marker.tooltip ? {value: String(marker.tooltip)} : undefined,
+                        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+                    }
+                });
+            });
+        }
+
+        if (!state.reviewStyleElement) {
+            state.reviewStyleElement = document.createElement('style');
+            state.reviewStyleElement.id = 'klab-review-marker-styles';
+            document.head.appendChild(state.reviewStyleElement);
+        }
+        state.reviewStyleElement.textContent = '.klab-review-marker{display:flex!important;align-items:center;justify-content:center;cursor:pointer;}' + rules.join('');
+        state.reviewDecorationIds = state.editor.deltaDecorations(previous, decorations);
+    }
+
+    function installReviewMarkerClickHandler(): void {
+        state.editor.onMouseDown((event: any) => {
+            if (!state.reviewMode || event?.target?.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+            let element: HTMLElement | null = event.target.element || null;
+            let marker: ReviewMarker | undefined;
+            while (element && !marker) {
+                for (let i = 0; i < element.classList.length; i++) {
+                    marker = state.reviewMarkerByClass[element.classList.item(i) || ''];
+                    if (marker) break;
+                }
+                element = element.parentElement;
+            }
+            if (!marker) return;
+            try {
+                (window as any).JavaBridge?.onReviewMarkerClicked?.(
+                    marker.id, marker.lineNumber, marker.action || null, marker.responsibility || null);
+            } catch (e) {
+                logError('Review marker click callback failed', e);
+            }
+        });
     }
 
     function rgb(name: string): string {
@@ -895,10 +1007,13 @@ function isCopyCutPaste(e: any) {
             theme: theme || 'vs-dark',
             automaticLayout: true,
             lineNumbers: state.showLineNumbers ? 'on' : 'off',
+            glyphMargin: state.reviewMode,
             mouseWheelScrollSensitivity: 1,
             fastScrollSensitivity: 1,
             smoothScrolling: true,
         });
+
+        installReviewMarkerClickHandler();
 
         // Keep external reference (some Java code may still use it)
         try {
@@ -1258,6 +1373,7 @@ function isCopyCutPaste(e: any) {
 
                     state.editor.setModel(model);
                     attachContentChanged(model);
+                    renderReviewMarkers();
 
                     try {
                         monaco.editor.setTheme(spec ? klabThemeName(theme) : theme);
@@ -1352,6 +1468,38 @@ function isCopyCutPaste(e: any) {
 
         isLineNumbersVisible(): boolean {
             return !!state.showLineNumbers;
+        },
+
+        setReviewMode(enabled: boolean) {
+            state.reviewMode = !!enabled;
+            ensureReady(() => {
+                if (!state.editor) return;
+                state.editor.updateOptions({glyphMargin: state.reviewMode});
+                renderReviewMarkers();
+            });
+        },
+
+        isReviewMode(): boolean {
+            return state.reviewMode;
+        },
+
+        setReviewMarkers(markers: ReviewMarker[]) {
+            const seen: { [id: string]: boolean } = {};
+            state.reviewMarkers = (markers || []).filter((marker) => {
+                if (!marker || !marker.id || seen[marker.id]) {
+                    if (marker?.id && seen[marker.id]) logWarn(`Ignoring duplicate review marker id ${marker.id}`);
+                    return false;
+                }
+                seen[marker.id] = true;
+                marker.lineNumber = Math.max(1, Math.floor(Number(marker.lineNumber) || 1));
+                return true;
+            });
+            ensureReady(renderReviewMarkers);
+        },
+
+        clearReviewMarkers() {
+            state.reviewMarkers = [];
+            ensureReady(renderReviewMarkers);
         },
 
         // Diagnostics API
