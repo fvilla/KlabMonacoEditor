@@ -122,7 +122,7 @@ public class KlabLspService {
                 type = "QUALITY";
             } else if (concept.getType().contains(SemanticType.ROLE)) {
                 type = "ROLE";
-            } else if (concept.getType().contains(SemanticType.TRAIT)) {
+            } else if (concept.getType().contains(SemanticType.PREDICATE)) {
                 type = "TRAIT";
             } else if (concept.getType().contains(SemanticType.RELATIONSHIP)) {
                 type = "RELATIONSHIP";
