@@ -140,6 +140,10 @@ public class KlabLspService {
                     SemanticType.AGENT)) {
                 type = "SUBJECT";
             }
+            // Preserve the color category and carry independent styling modifiers to the bridge.
+            if (concept.getType().contains(SemanticType.ABSTRACT)) {
+                type += " ABSTRACT";
+            }
             conceptMap.put(concept.getNamespace() + ":" + concept.getUrn(), type);
         }
         return conceptMap;

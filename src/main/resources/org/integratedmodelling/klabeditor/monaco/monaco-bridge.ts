@@ -600,6 +600,8 @@ function isCopyCutPaste(e: any) {
                     [/[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*(?:#[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?(?:,[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?)*)?/, "klab." + tokenName("UNKNOWN")],
                     // Consume the complete metadata key before identifier/keyword rules run.
                     [/[:+!][a-z][a-z0-9_]*/, "klab.metadata"],
+                    // Match paths as a whole so keyword segments remain identifiers.
+                    [/[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)+/, "identifier"],
                     [/[a-zA-Z_$][\w$]*/, {cases: {"@keywords": "klab.keyword", "@default": "identifier"}}],
                     [/@symbols/, {cases: {"@operators": "klab.operator", "@default": ""}}],
                     [/\[/, "@brackets", "@groovy"],
@@ -788,6 +790,7 @@ function isCopyCutPaste(e: any) {
             css += `.monaco-editor .${tokenName(name)}{color:${color} !important;}`;
             css += `.monaco-editor.vs-dark .${tokenName(name)}{color:${darkRgb(name)} !important;}`;
         }
+        css += ".monaco-editor .klab-abstract{font-style:italic !important;}";
         css += ".monaco-editor .klab-urn-online{color:#006600 !important;font-weight:bold;}";
         css += ".monaco-editor .klab-urn-offline{color:#606060 !important;font-weight:bold;}";
         css += ".monaco-editor .klab-urn-error{color:#ff0000 !important;}";
@@ -802,11 +805,15 @@ function isCopyCutPaste(e: any) {
 
     async function conceptClass(concept: string): Promise<string> {
         if (!conceptCategoryCache[concept]) {
-            // Required service endpoint: GET /concept/<URL-encoded concept> -> "QUALITY" or { "category": "QUALITY" }.
+            // Categories may include an ABSTRACT modifier, e.g. "QUALITY ABSTRACT".
+            // GET /concept/<URL-encoded concept> -> "QUALITY" or { "category": "QUALITY", "abstract": true }.
             const payload = await fetchJson("/concept/" + encodeURIComponent(concept));
-            conceptCategoryCache[concept] = ((typeof payload === "string" ? payload : payload?.category) || "UNKNOWN").toUpperCase();
+            conceptCategoryCache[concept] = ((typeof payload === "string" ? payload : payload?.category) || "UNKNOWN").toUpperCase()
+                + (payload?.abstract === true ? " ABSTRACT" : "");
         }
-        return tokenName(conceptCategoryCache[concept]);
+        const categoryAndModifiers = conceptCategoryCache[concept].trim().split(/\s+/);
+        return tokenName(categoryAndModifiers[0])
+            + (categoryAndModifiers.indexOf("ABSTRACT") >= 1 ? " klab-abstract" : "");
     }
 
     function preloadConceptEntry(concept: string, category?: string | null): Promise<void> {
@@ -917,7 +924,7 @@ function isCopyCutPaste(e: any) {
             const end = model.getPositionAt(match.index + match[0].length);
             decorations.push({
                 range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-                options: {inlineClassName: className}
+                options: {inlineClassName: className, inlineClassNameAffectsLetterSpacing: true}
             });
         };
 
