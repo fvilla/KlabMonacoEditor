@@ -40,8 +40,8 @@ public class KlabLspService {
     private Launcher<LanguageServer> launcher;
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private int versionCounter = 1;
-    private volatile LanguageDescriptor languageConfig;
-    private volatile Map<String, String> conceptMap = new HashMap<>();
+    private LanguageDescriptor languageConfig;
+    private Map<String, String> conceptMap = new HashMap<>();
 
     private volatile boolean initialized = false;
 
@@ -52,7 +52,7 @@ public class KlabLspService {
         if (languageConfig == null) {
             return Collections.emptyList();
         }
-        var languageType = resolveLanguage(language);
+        var languageType = KlabLanguage.forId(language);
         if (languageType == null) {
             return Collections.emptyList();
         }
@@ -60,61 +60,7 @@ public class KlabLspService {
         if (descriptor == null) {
             return Collections.emptyList();
         }
-        return descriptor.getKeywords() == null ? Collections.emptyList()
-                : List.copyOf(descriptor.getKeywords());
-    }
-
-    private KlabLanguage resolveLanguage(String language) {
-        if (language == null || language.isBlank()) {
-            return null;
-        }
-        var byId = KlabLanguage.forId(language);
-        if (byId != null) {
-            return byId;
-        }
-        for (var candidate : KlabLanguage.values()) {
-            if (candidate.languageName().equalsIgnoreCase(language)
-                    || candidate.fileExtension().equalsIgnoreCase(language)
-                    || ("." + candidate.fileExtension()).equalsIgnoreCase(language)) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Populate the immutable metadata used by the Monaco highlighter. This is deliberately
-     * independent of LSP process initialization: Monarch only needs the language descriptor and
-     * the current worldview, both of which are available from the user scope.
-     *
-     * @return true when language metadata was obtained from a resources service
-     */
-    public synchronized boolean ensureHighlightingMetadata(UserScope scope) {
-        if (scope == null) {
-            return false;
-        }
-
-        if (languageConfig == null) {
-            try {
-                var resources = scope.getService(ResourcesService.class);
-                if (resources != null) {
-                    languageConfig = resources.info("languageInfo",
-                            KlabAsset.KnowledgeClass.INFORMATION,
-                            LanguageDescriptor.class,
-                            scope);
-                }
-            } catch (Exception e) {
-                // leave it null, complain later
-            }
-            if (languageConfig /* still */ == null) {
-                System.err.println("[KlabLspService] Cannot load language highlighting metadata from resources service");
-            }
-        }
-
-        if (conceptMap.isEmpty() && scope.getWorldview() != null) {
-            conceptMap = updateConceptMap(scope.getWorldview());
-        }
-        return languageConfig != null;
+        return descriptor.getKeywords();
     }
 
     /**
@@ -130,11 +76,7 @@ public class KlabLspService {
      */
     public synchronized boolean ensureInitialized(LocalInstance lspServer, UserScope scope) {
 
-        // Syntax highlighting does not depend on an LSP process. Populate its caches even when
-        // editing support is disabled or the language server failed to start.
-        ensureHighlightingMetadata(scope);
-
-        if (lspServer == null || lspServer.getStatus() != LocalInstance.Status.RUNNING) {
+        if (lspServer.getStatus() != LocalInstance.Status.RUNNING) {
             return false;
         }
 
@@ -144,6 +86,13 @@ public class KlabLspService {
 
         try {
             LanguageClient client = new KlabLanguageClient();
+
+            this.languageConfig = scope.getService(ResourcesService.class).info("klab.languages",
+                    KlabAsset.KnowledgeClass.INFORMATION,
+                    LanguageDescriptor.class,
+                    scope);
+
+            this.conceptMap = updateConceptMap(scope.getWorldview());
 
             launcher = Launcher.createLauncher(client, LanguageServer.class, lspServer.getInputStream(),
                     lspServer.getOutputStream(), executor, Function.identity());
@@ -173,7 +122,7 @@ public class KlabLspService {
                 type = "QUALITY";
             } else if (concept.getType().contains(SemanticType.ROLE)) {
                 type = "ROLE";
-            } else if (concept.getType().contains(SemanticType.TRAIT)) {
+            } else if (concept.getType().contains(SemanticType.PREDICATE)) {
                 type = "TRAIT";
             } else if (concept.getType().contains(SemanticType.RELATIONSHIP)) {
                 type = "RELATIONSHIP";
@@ -190,6 +139,10 @@ public class KlabLspService {
             } else if (concept.getType().contains(SemanticType.SUBJECT) || concept.getType().contains(
                     SemanticType.AGENT)) {
                 type = "SUBJECT";
+            }
+            // Preserve the color category and carry independent styling modifiers to the bridge.
+            if (concept.getType().contains(SemanticType.ABSTRACT)) {
+                type += " ABSTRACT";
             }
             conceptMap.put(concept.getNamespace() + ":" + concept.getUrn(), type);
         }

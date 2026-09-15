@@ -79,10 +79,49 @@ String currentText = editor.getText();
 editor.setCursorPosition(characterOffset);
 editor.requestEditorFocus();
 editor.setLineNumbers(false);
+editor.setMinimapVisible(false);
+editor.setTheme("vs");
 ```
+
+The built-in <kbd>Ctrl</kbd>+<kbd>S</kbd>/<kbd>Cmd</kbd>+<kbd>S</kbd> command advances the dirty-state
+baseline before invoking `setOnSave`. If a toolbar button or another external action performs the
+save, call `editor.markSaved()` after persistence succeeds.
+For an asynchronous save, retain the submitted snapshot and call `editor.markSaved(savedText)` when
+that exact snapshot is confirmed; edits made while the request is in flight will remain dirty.
 
 Calls that affect Monaco can be made before its JavaScript bridge is ready; supported pending state
 is replayed when initialization completes.
+
+### Add optional command and status bars
+
+Subclass the editor and return fully initialized JavaFX nodes for either side of the top or bottom
+bar. A bar is not created when its callback returns no components, so the base editor retains its
+original borderless appearance.
+
+```java
+public final class ProjectEditor extends MonacoEditorView {
+  @Override
+  protected Collection<BarComponent> createHeaderBarComponents() {
+    Button save = new Button("Save");
+    save.setOnAction(event -> {
+      save(getText());
+      markSaved();
+    });
+    return List.of(new BarComponent(save, BarSide.LEFT));
+  }
+
+  @Override
+  protected Collection<BarComponent> createStatusBarComponents() {
+    Label status = new Label("Ready");
+    return List.of(new BarComponent(status, BarSide.RIGHT));
+  }
+}
+```
+
+For components created after the callbacks run, subclasses can call
+`installBarComponent(EditorBar.STATUS, new BarComponent(node, BarSide.LEFT))` on the JavaFX thread.
+The bars use AtlantaFX semantic color lookups and otherwise leave child-control styling to the
+active application theme.
 
 ### Show diagnostics without LSP
 
@@ -98,6 +137,37 @@ For simple markers, use `createMarker` or `createMarkerByOffset`:
 editor.createMarker(4, "Check this statement", "warning");
 editor.createMarkerByOffset(120, 8, "Unknown identifier", "error");
 ```
+
+### Add clickable review markers
+
+Review markers use Monaco's glyph margin, the column to the left of line numbers. The margin and
+markers are hidden unless review mode is enabled:
+
+```java
+editor.setReviewMarkers(List.of(
+    new MonacoEditorView.ReviewMarker(
+        "comment-42", 4, "!", "#e67e22", 18,
+        "Architecture review", "open-comment", "platform-team"),
+    new MonacoEditorView.ReviewMarker(
+        "approval-7", 12, "✓", "seagreen", 16,
+        "Approved", "show-approval", "maria")));
+
+editor.setOnReviewMarkerClicked(click -> {
+  openReviewAction(click.id(), click.action(), click.responsibility(), click.lineNumber());
+});
+
+editor.setOnReviewMarginDoubleClicked(lineNumber -> {
+  createReviewAt(lineNumber);
+});
+
+editor.setReviewMode(true);
+```
+
+Marker ids are unique. `putReviewMarker` adds or replaces one marker, `removeReviewMarker` removes
+one, and `clearReviewMarkers` removes all of them. The icon is a text glyph, the color accepts CSS
+colors, and sizes are clamped to 8–32 pixels. Marker state survives review-mode toggles and editor
+initialization. The margin double-click callback only fires for empty glyph cells, not when the user
+double-clicks an existing marker.
 
 ## Use the editor with the k.LAB LSP service
 

@@ -10,6 +10,8 @@ interface MonacoOpenDoc {
     text: string;
     language?: string;
     theme?: string;
+    showLineNumbers?: boolean;
+    minimapVisible?: boolean;
     highlighterServiceUrl?: string;
 }
 
@@ -24,12 +26,30 @@ interface MonacoBridgeApi {
 
     getText(): string;
 
+    markSaved(savedText?: string): void;
+
     setCursorPosition(offset: number): void;
     focusEditor(): void;
 
     setLineNumbers(show: boolean): void;
 
     isLineNumbersVisible(): boolean;
+
+    setMinimapVisible(show: boolean): void;
+
+    isMinimapVisible(): boolean;
+
+    setTheme(theme: string): void;
+
+    getTheme(): string;
+
+    setReviewMode(enabled: boolean): void;
+
+    isReviewMode(): boolean;
+
+    setReviewMarkers(markers: ReviewMarker[]): void;
+
+    clearReviewMarkers(): void;
 
     // Diagnostics API (replaces window.kim_setDiagnostics)
     setDiagnostics(markers: any[]): void;
@@ -52,6 +72,17 @@ interface MonacoBridgeApi {
     _onAmdReady(container: HTMLElement): void;
 
     _notifyJavaReady(): boolean;
+}
+
+interface ReviewMarker {
+    id: string;
+    lineNumber: number;
+    icon?: string;
+    color?: string;
+    size?: number;
+    tooltip?: string;
+    action?: string;
+    responsibility?: string;
 }
 
 function logError(context: string, e: any) {
@@ -152,6 +183,32 @@ function isCopyCutPaste(e: any) {
         SEMANTIC_MODIFIER: [0, 0, 0]
     };
 
+    // Keep the light palette above stable. These values are only used by the dark theme;
+    // each color preserves the hue of its light-theme counterpart while increasing contrast.
+    const DARK_COLOR_RGB: { [name: string]: number[] } = {
+        DOMAIN: [103, 232, 231],
+        CONFIGURATION: [92, 200, 200],
+        EVENT: [230, 214, 106],
+        EXTENT: [104, 217, 217],
+        PROCESS: [255, 133, 133],
+        QUALITY: [120, 224, 143],
+        RELATIONSHIP: [241, 207, 112],
+        TRAIT: [114, 174, 245],
+        ROLE: [115, 169, 237],
+        SUBJECT: [224, 160, 110],
+        LIVE_URN: [105, 201, 138],
+        INACTIVE_URN: [255, 229, 138],
+        ERROR: [255, 123, 123],
+        UNKNOWN: [196, 196, 196],
+        INACTIVE: [192, 192, 192],
+        VERSION: [112, 217, 217],
+        KEYWORD: [255, 157, 181],
+        VALUE_OPERATOR: [212, 212, 212],
+        UNARY_OPERATOR: [212, 212, 212],
+        BINARY_OPERATOR: [212, 212, 212],
+        SEMANTIC_MODIFIER: [212, 212, 212]
+    };
+
     const TOKEN_COLORS: { [token: string]: string } = {};
     const registeredLanguages: { [id: string]: boolean } = {};
     const keywordCache: { [name: string]: string[] } = {};
@@ -167,14 +224,22 @@ function isCopyCutPaste(e: any) {
         container: HTMLElement | null,
         ready: boolean,
         showLineNumbers: boolean,
+        showMinimap: boolean,
+        theme: string,
+        reviewMode: boolean,
+        reviewMarkers: ReviewMarker[],
+        reviewDecorationIds: string[],
+        reviewMarkerByClass: { [className: string]: ReviewMarker },
+        reviewStyleElement?: HTMLStyleElement | null,
         pendingCalls: Array<() => void>,
-        savedVersionId: number,
+        savedText: string,
         dirty: boolean,
         highlighterServiceUrl: string,
         activeLanguageSpec?: KlabLanguageSpec | null,
         semanticDecorationIds: string[],
         semanticScanTimer?: number | null,
         _contentDisposable?: any,
+        _dirtyDisposable?: any,
         _wheelNormalizerInstalled?: boolean,
         _currentUri?: any | null
     } = {
@@ -182,14 +247,22 @@ function isCopyCutPaste(e: any) {
         container: null,
         ready: false,
         showLineNumbers: true,
+        showMinimap: true,
+        theme: 'vs-dark',
+        reviewMode: false,
+        reviewMarkers: [],
+        reviewDecorationIds: [],
+        reviewMarkerByClass: {},
+        reviewStyleElement: null,
         pendingCalls: [],
-        savedVersionId: 0,
+        savedText: '',
         dirty: false,
         highlighterServiceUrl: DEFAULT_HIGHLIGHTER_SERVICE_URL,
         activeLanguageSpec: null,
         semanticDecorationIds: [],
         semanticScanTimer: null,
         _contentDisposable: null as any,
+        _dirtyDisposable: null as any,
         _wheelNormalizerInstalled: false,
         _currentUri: null
     };
@@ -293,8 +366,116 @@ function isCopyCutPaste(e: any) {
         monaco.editor.setModelMarkers(model, OWNER_MARKERS, [...markers, marker]);
     }
 
+    function cssColor(value?: string): string {
+        const fallback = '#4f8cff';
+        if (!value) return fallback;
+        try {
+            const probe = document.createElement('span');
+            probe.style.color = '';
+            probe.style.color = value;
+            return probe.style.color || fallback;
+        } catch {
+            return fallback;
+        }
+    }
+
+    function cssString(value: string): string {
+        return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+            .replace(/\r/g, '').replace(/\n/g, '\\A ') + '"';
+    }
+
+    function reviewClass(index: number): string {
+        return `klab-review-marker-${index}`;
+    }
+
+    function renderReviewMarkers(): void {
+        if (!state.editor) return;
+
+        const previous = state.reviewDecorationIds;
+        state.reviewMarkerByClass = {};
+        const decorations: any[] = [];
+        const rules: string[] = [];
+
+        if (state.reviewMode) {
+            const model = state.editor.getModel?.();
+            const lastLine = Math.max(1, model?.getLineCount?.() || 1);
+            state.reviewMarkers.forEach((marker, index) => {
+                const className = reviewClass(index);
+                const size = Math.max(8, Math.min(32, Math.floor(Number(marker.size) || 16)));
+                const icon = marker.icon == null || marker.icon === '' ? '●' : String(marker.icon);
+                state.reviewMarkerByClass[className] = marker;
+                rules.push(`.${className}::before{content:${cssString(icon)};color:${cssColor(marker.color)};font-size:${size}px;line-height:1;}`);
+                decorations.push({
+                    range: new monaco.Range(Math.min(marker.lineNumber, lastLine), 1,
+                        Math.min(marker.lineNumber, lastLine), 1),
+                    options: {
+                        isWholeLine: true,
+                        glyphMarginClassName: `klab-review-marker ${className}`,
+                        glyphMarginHoverMessage: marker.tooltip ? {value: String(marker.tooltip)} : undefined,
+                        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+                    }
+                });
+            });
+        }
+
+        if (!state.reviewStyleElement) {
+            state.reviewStyleElement = document.createElement('style');
+            state.reviewStyleElement.id = 'klab-review-marker-styles';
+            document.head.appendChild(state.reviewStyleElement);
+        }
+        state.reviewStyleElement.textContent = '.klab-review-marker{display:flex!important;align-items:center;justify-content:center;cursor:pointer;}' + rules.join('');
+        state.reviewDecorationIds = state.editor.deltaDecorations(previous, decorations);
+    }
+
+    function installReviewMarkerClickHandler(): void {
+        state.editor.onMouseDown((event: any) => {
+            if (!state.reviewMode || event?.target?.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+            let element: HTMLElement | null = event.target.element || null;
+            let marker: ReviewMarker | undefined;
+            while (element && !marker) {
+                for (let i = 0; i < element.classList.length; i++) {
+                    marker = state.reviewMarkerByClass[element.classList.item(i) || ''];
+                    if (marker) break;
+                }
+                element = element.parentElement;
+            }
+
+            const mouseEvent = event?.event;
+            const clickCount = Number(mouseEvent?.detail ?? mouseEvent?.browserEvent?.detail ?? 1);
+            if (clickCount === 2) {
+                if (!marker) {
+                    const lineNumber = Number(event.target.position?.lineNumber ||
+                        event.target.range?.startLineNumber || 0);
+                    if (lineNumber > 0) {
+                        try {
+                            (window as any).JavaBridge?.onReviewMarginDoubleClicked?.(lineNumber);
+                        } catch (e) {
+                            logError('Review margin double-click callback failed', e);
+                        }
+                    }
+                }
+                return;
+            }
+            if (!marker) return;
+            try {
+                (window as any).JavaBridge?.onReviewMarkerClicked?.(
+                    marker.id, marker.lineNumber, marker.action || null, marker.responsibility || null);
+            } catch (e) {
+                logError('Review marker click callback failed', e);
+            }
+        });
+    }
+
     function rgb(name: string): string {
         const value = COLOR_RGB[(name || "").toUpperCase()] || COLOR_RGB.UNKNOWN;
+        return "#" + value.map((part) => {
+            const hex = Math.max(0, Math.min(255, part)).toString(16);
+            return hex.length === 1 ? "0" + hex : hex;
+        }).join("");
+    }
+
+    function darkRgb(name: string): string {
+        const value = DARK_COLOR_RGB[(name || "").toUpperCase()] || DARK_COLOR_RGB.UNKNOWN;
         return "#" + value.map((part) => {
             const hex = Math.max(0, Math.min(255, part)).toString(16);
             return hex.length === 1 ? "0" + hex : hex;
@@ -324,6 +505,8 @@ function isCopyCutPaste(e: any) {
     function installKlabTheme(baseTheme: string) {
         const rules: any[] = [
             {token: "klab.keyword", foreground: rgb("KEYWORD").substring(1), fontStyle: "bold"},
+            // Metadata keys are intentionally muted and must not inherit keyword styling.
+            {token: "klab.metadata", foreground: "808080"},
             {token: "klab.comment", foreground: "4ea64e", fontStyle: "italic"},
             {token: "klab.doccomment", foreground: "0000a0"},
             {token: "klab.operator", foreground: rgb("VALUE_OPERATOR").substring(1)},
@@ -338,6 +521,37 @@ function isCopyCutPaste(e: any) {
             rules.push({token, foreground: rgb(name).substring(1)});
         }
 
+        // Monarch appends tokenPostfix to emitted tokens. Keep an exact keyword rule
+        // after the generated category rules so keyword styling remains unambiguous.
+        rules.push({token: "klab.keyword.klab", foreground: rgb("KEYWORD").substring(1), fontStyle: "bold"});
+
+        const darkRules = rules.map((rule) => {
+            switch (rule.token) {
+                case "klab.keyword":
+                    return {...rule, foreground: darkRgb("KEYWORD").substring(1)};
+                case "klab.metadata":
+                    return {...rule, foreground: "b0b0b0"};
+                case "klab.comment":
+                    return {...rule, foreground: "7fd18b"};
+                case "klab.doccomment":
+                    return {...rule, foreground: "8fb4ff"};
+                case "klab.operator":
+                case "klab.delimiter":
+                    return {...rule, foreground: "d4d4d4"};
+                case "klab.number":
+                    return {...rule, foreground: "8bd5ff"};
+                case "klab.string":
+                    return {...rule, foreground: "a8e6a3"};
+                default:
+                    if (rule.token.indexOf("klab.klab-") === 0) {
+                        const colorName = rule.token.substring("klab.klab-".length).toUpperCase();
+                        return {...rule, foreground: darkRgb(colorName).substring(1)};
+                    }
+                    return rule;
+            }
+        });
+        darkRules.push({token: "klab.keyword.klab", foreground: darkRgb("KEYWORD").substring(1), fontStyle: "bold"});
+
         try {
             monaco.editor.defineTheme("klab-vs", {
                 base: "vs",
@@ -348,7 +562,7 @@ function isCopyCutPaste(e: any) {
             monaco.editor.defineTheme("klab-vs-dark", {
                 base: "vs-dark",
                 inherit: true,
-                rules,
+                rules: darkRules,
                 colors: {}
             });
         } catch (e) {
@@ -384,6 +598,10 @@ function isCopyCutPaste(e: any) {
                     [/\d+[lL]?/, "klab.number"],
                     [/[a-z]+(?:\.[a-z]+)*:[A-Z][A-Za-z0-9]*/, "klab." + tokenName("UNKNOWN")],
                     [/[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*(?:#[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?(?:,[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?)*)?/, "klab." + tokenName("UNKNOWN")],
+                    // Consume the complete metadata key before identifier/keyword rules run.
+                    [/[:+!][a-z][a-z0-9_]*/, "klab.metadata"],
+                    // Match paths as a whole so keyword segments remain identifiers.
+                    [/[a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)+/, "identifier"],
                     [/[a-zA-Z_$][\w$]*/, {cases: {"@keywords": "klab.keyword", "@default": "identifier"}}],
                     [/@symbols/, {cases: {"@operators": "klab.operator", "@default": ""}}],
                     [/\[/, "@brackets", "@groovy"],
@@ -574,22 +792,32 @@ function isCopyCutPaste(e: any) {
         for (const name in COLOR_RGB) {
             const color = rgb(name);
             css += `.monaco-editor .${tokenName(name)}{color:${color} !important;}`;
+            css += `.monaco-editor.vs-dark .${tokenName(name)}{color:${darkRgb(name)} !important;}`;
         }
+        css += ".monaco-editor .klab-abstract{font-style:italic !important;}";
         css += ".monaco-editor .klab-urn-online{color:#006600 !important;font-weight:bold;}";
         css += ".monaco-editor .klab-urn-offline{color:#606060 !important;font-weight:bold;}";
         css += ".monaco-editor .klab-urn-error{color:#ff0000 !important;}";
         css += ".monaco-editor .klab-urn-unknown{color:#808080 !important;font-style:italic;}";
+        css += ".monaco-editor.vs-dark .klab-urn-online{color:#69c98a !important;}";
+        css += ".monaco-editor.vs-dark .klab-urn-offline{color:#c0c0c0 !important;}";
+        css += ".monaco-editor.vs-dark .klab-urn-error{color:#ff7b7b !important;}";
+        css += ".monaco-editor.vs-dark .klab-urn-unknown{color:#c4c4c4 !important;}";
         style.textContent = css;
         document.head.appendChild(style);
     }
 
     async function conceptClass(concept: string): Promise<string> {
         if (!conceptCategoryCache[concept]) {
-            // Required service endpoint: GET /concept/<URL-encoded concept> -> "QUALITY" or { "category": "QUALITY" }.
+            // Categories may include an ABSTRACT modifier, e.g. "QUALITY ABSTRACT".
+            // GET /concept/<URL-encoded concept> -> "QUALITY" or { "category": "QUALITY", "abstract": true }.
             const payload = await fetchJson("/concept/" + encodeURIComponent(concept));
-            conceptCategoryCache[concept] = ((typeof payload === "string" ? payload : payload?.category) || "UNKNOWN").toUpperCase();
+            conceptCategoryCache[concept] = ((typeof payload === "string" ? payload : payload?.category) || "UNKNOWN").toUpperCase()
+                + (payload?.abstract === true ? " ABSTRACT" : "");
         }
-        return tokenName(conceptCategoryCache[concept]);
+        const categoryAndModifiers = conceptCategoryCache[concept].trim().split(/\s+/);
+        return tokenName(categoryAndModifiers[0])
+            + (categoryAndModifiers.indexOf("ABSTRACT") >= 1 ? " klab-abstract" : "");
     }
 
     function preloadConceptEntry(concept: string, category?: string | null): Promise<void> {
@@ -700,7 +928,7 @@ function isCopyCutPaste(e: any) {
             const end = model.getPositionAt(match.index + match[0].length);
             decorations.push({
                 range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-                options: {inlineClassName: className}
+                options: {inlineClassName: className, inlineClassNameAffectsLetterSpacing: true}
             });
         };
 
@@ -825,10 +1053,14 @@ function isCopyCutPaste(e: any) {
             theme: theme || 'vs-dark',
             automaticLayout: true,
             lineNumbers: state.showLineNumbers ? 'on' : 'off',
+            minimap: {enabled: state.showMinimap},
+            glyphMargin: state.reviewMode,
             mouseWheelScrollSensitivity: 1,
             fastScrollSensitivity: 1,
             smoothScrolling: true,
         });
+
+        installReviewMarkerClickHandler();
 
         // Keep external reference (some Java code may still use it)
         try {
@@ -866,17 +1098,13 @@ function isCopyCutPaste(e: any) {
                 try {
                     const model = state.editor.getModel?.();
                     const textNow = model ? (model.getValue?.() || '') : (state.editor.getValue?.() || '');
-                    (window as any).JavaBridge?.onSave?.(textNow);
-
                     if (model) {
-                        state.savedVersionId = model.getAlternativeVersionId();
-                        if (state.dirty) {
-                            state.dirty = false;
-                            (window as any).JavaBridge?.onDirtyChanged?.(false);
-                        }
+                        markModelSaved(model);
                     }
+                    // Advance the baseline before application code can inspect or modify the editor.
+                    (window as any).JavaBridge?.onSave?.(textNow);
                 } catch (e) {
-                    logError("Copy command failed", e);
+                    logError("Save command failed", e);
                 }
             });
         } catch (e) {
@@ -1086,19 +1314,33 @@ function isCopyCutPaste(e: any) {
         installWheelNormalizer();
     }
 
+    function notifyDirtyChanged(dirty: boolean) {
+        if (dirty === state.dirty) return;
+        state.dirty = dirty;
+        (window as any).JavaBridge?.onDirtyChanged?.(dirty);
+    }
+
+    function markModelSaved(model: any, savedText?: string) {
+        state.savedText = typeof savedText === 'string' ? savedText : (model.getValue?.() || '');
+        const currentText = model.getValue?.() || '';
+        notifyDirtyChanged(currentText !== state.savedText);
+        (window as any).JavaBridge?.onSavedBaselineChanged?.(state.savedText);
+    }
+
     function attachDirtyTracking(model: any) {
         try {
-            state.savedVersionId = model.getAlternativeVersionId();
-            state.dirty = false;
-            (window as any).JavaBridge?.onDirtyChanged?.(false);
+            if (state._dirtyDisposable?.dispose) {
+                state._dirtyDisposable.dispose();
+            }
+        } catch {
+        }
 
-            model.onDidChangeContent(() => {
-                const newVersion = model.getAlternativeVersionId();
-                const isDirty = newVersion !== state.savedVersionId;
-                if (isDirty !== state.dirty) {
-                    state.dirty = isDirty;
-                    (window as any).JavaBridge?.onDirtyChanged?.(isDirty);
-                }
+        try {
+            markModelSaved(model);
+
+            state._dirtyDisposable = model.onDidChangeContent(() => {
+                const isDirty = (model.getValue?.() || '') !== state.savedText;
+                notifyDirtyChanged(isDirty);
             });
         } catch {
         }
@@ -1144,6 +1386,13 @@ function isCopyCutPaste(e: any) {
 
                     let language = doc.language || 'plaintext';
                     const theme = doc.theme || 'vs-dark';
+                    state.theme = theme;
+                    if (typeof doc.showLineNumbers === 'boolean') {
+                        state.showLineNumbers = doc.showLineNumbers;
+                    }
+                    if (typeof doc.minimapVisible === 'boolean') {
+                        state.showMinimap = doc.minimapVisible;
+                    }
                     const spec = normalizeLanguage(language);
                     state.activeLanguageSpec = spec;
                     if (spec) {
@@ -1188,6 +1437,7 @@ function isCopyCutPaste(e: any) {
 
                     state.editor.setModel(model);
                     attachContentChanged(model);
+                    renderReviewMarkers();
 
                     try {
                         monaco.editor.setTheme(spec ? klabThemeName(theme) : theme);
@@ -1230,11 +1480,7 @@ function isCopyCutPaste(e: any) {
                 model.setValue(text || '');
 
                 // programmatic set => reset dirty baseline
-                state.savedVersionId = model.getAlternativeVersionId();
-                if (state.dirty) {
-                    state.dirty = false;
-                    (window as any).JavaBridge?.onDirtyChanged?.(false);
-                }
+                markModelSaved(model);
             });
         },
 
@@ -1282,6 +1528,72 @@ function isCopyCutPaste(e: any) {
 
         isLineNumbersVisible(): boolean {
             return !!state.showLineNumbers;
+        },
+
+        markSaved(savedText?: string) {
+            ensureReady(() => {
+                const model = state.editor?.getModel?.();
+                if (model) markModelSaved(model, savedText);
+            });
+        },
+
+        setMinimapVisible(show: boolean) {
+            state.showMinimap = !!show;
+            ensureReady(() => {
+                if (state.editor) state.editor.updateOptions({minimap: {enabled: state.showMinimap}});
+            });
+        },
+
+        isMinimapVisible(): boolean {
+            return !!state.showMinimap;
+        },
+
+        setTheme(theme: string) {
+            if (!theme) return;
+            state.theme = theme;
+            ensureReady(() => {
+                try {
+                    monaco.editor.setTheme(state.activeLanguageSpec ? klabThemeName(theme) : theme);
+                } catch (e) {
+                    logWarn(`Failed to set theme ${theme}`);
+                }
+            });
+        },
+
+        getTheme(): string {
+            return state.theme;
+        },
+
+        setReviewMode(enabled: boolean) {
+            state.reviewMode = !!enabled;
+            ensureReady(() => {
+                if (!state.editor) return;
+                state.editor.updateOptions({glyphMargin: state.reviewMode});
+                renderReviewMarkers();
+            });
+        },
+
+        isReviewMode(): boolean {
+            return state.reviewMode;
+        },
+
+        setReviewMarkers(markers: ReviewMarker[]) {
+            const seen: { [id: string]: boolean } = {};
+            state.reviewMarkers = (markers || []).filter((marker) => {
+                if (!marker || !marker.id || seen[marker.id]) {
+                    if (marker?.id && seen[marker.id]) logWarn(`Ignoring duplicate review marker id ${marker.id}`);
+                    return false;
+                }
+                seen[marker.id] = true;
+                marker.lineNumber = Math.max(1, Math.floor(Number(marker.lineNumber) || 1));
+                return true;
+            });
+            ensureReady(renderReviewMarkers);
+        },
+
+        clearReviewMarkers() {
+            state.reviewMarkers = [];
+            ensureReady(renderReviewMarkers);
         },
 
         // Diagnostics API

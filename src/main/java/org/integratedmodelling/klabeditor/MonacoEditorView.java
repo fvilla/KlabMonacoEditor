@@ -9,6 +9,10 @@ import javafx.concurrent.Worker;
 import javafx.scene.Node;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.web.WebEngine;
 import javafx.util.Duration;
@@ -59,6 +63,9 @@ public class MonacoEditorView extends StackPane {
 
     private final DebugWebView webView = new DebugWebView(false);
     private final WebEngine webEngine = webView.getEngine();
+    private final BorderPane editorLayout = new BorderPane();
+    private final EnumMap<EditorBar, BarLayout> bars = new EnumMap<>(EditorBar.class);
+    private boolean barsConfigured;
 
     private final AtomicBoolean pageLoaded = new AtomicBoolean(false);
     /**
@@ -81,12 +88,17 @@ public class MonacoEditorView extends StackPane {
     private Consumer<Integer> cursorPositionListener;
     private Consumer<String> onSaveListener;
     private Consumer<Boolean> onDirtyChangedListener;
+    private Consumer<ReviewMarkerClick> reviewMarkerClickListener;
+    private Consumer<Integer> reviewMarginDoubleClickListener;
     private volatile boolean isDirty;
     private volatile String pendingDiagnosticsJson = null;
     private volatile Integer pendingCursorOffset = null;
     private volatile boolean pendingEditorFocus = false;
     private volatile String pendingConceptHighlighterJson = null;
     private volatile String pendingKeywordHighlighterJson = null;
+    private volatile String pendingReviewMarkersJson = "[]";
+    private volatile boolean reviewMode;
+    private final Map<String, ReviewMarker> reviewMarkers = new LinkedHashMap<>();
     private final Map<String, List<String>> pendingKeywordHighlighterCache = new HashMap<>();
     private final List<Runnable> editorRenderedCallbacks = new ArrayList<>();
     private boolean editorRendered;
@@ -95,6 +107,8 @@ public class MonacoEditorView extends StackPane {
     private String initialText = "";
     private String initialLanguage = "plaintext";
     private String initialTheme = "vs-dark";
+    private boolean showLineNumbers = true;
+    private boolean showMinimap = true;
     private String highlighterServiceUrl = "http://localhost:8765";
 
     private Consumer<String> changeListener;
@@ -113,12 +127,19 @@ public class MonacoEditorView extends StackPane {
 
     public MonacoEditorView(String documentUri, Consumer<String> saveCallback) {
         this.documentUri = documentUri;
-        getChildren().add(webView);
+        getStyleClass().add("monaco-editor-view");
+        URL stylesheet = MonacoEditorView.class.getResource(
+                "/org/integratedmodelling/klabeditor/monaco-editor-view.css");
+        if (stylesheet != null) {
+            getStylesheets().add(stylesheet.toExternalForm());
+        }
+
+        editorLayout.setCenter(webView);
+        getChildren().add(editorLayout);
         setPrefSize(800, 600);
 
-        // Ensure WebView fills the container
-        webView.setPrefSize(RegionU.width(this), RegionU.height(this));
-        RegionU.bindToParent(this, webView);
+        // BorderPane allocates all space not used by optional bars to the WebView.
+        webView.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
 
         // Expose a Java connector for callbacks from JS
         webEngine.getLoadWorker().stateProperty().addListener(pageLoadListener());
@@ -142,6 +163,111 @@ public class MonacoEditorView extends StackPane {
                 webEngine.load(url.toExternalForm());
             }
         }
+    }
+
+    /** The two optional component bars surrounding the editor. */
+    public enum EditorBar {
+        HEADER, STATUS
+    }
+
+    /** Horizontal placement of a component within an editor bar. */
+    public enum BarSide {
+        LEFT, RIGHT
+    }
+
+    /**
+     * A fully initialized JavaFX node and its placement within a bar.
+     *
+     * @param node component to install; a node can belong to only one JavaFX parent
+     * @param side side on which the component is aligned
+     */
+    public record BarComponent(Node node, BarSide side) {
+        public BarComponent {
+            Objects.requireNonNull(node, "node");
+            Objects.requireNonNull(side, "side");
+        }
+    }
+
+    /**
+     * Components to install in the top bar. Subclasses may override this callback; returning an
+     * empty collection keeps the header bar absent.
+     */
+    protected Collection<BarComponent> createHeaderBarComponents() {
+        return List.of();
+    }
+
+    /**
+     * Components to install in the bottom bar. Subclasses may override this callback; returning an
+     * empty collection keeps the status bar absent.
+     */
+    protected Collection<BarComponent> createStatusBarComponents() {
+        return List.of();
+    }
+
+    /**
+     * Install a component in either bar. This may be called by bar-definition callbacks or later on
+     * the JavaFX application thread. The requested bar is created lazily.
+     */
+    protected final void installBarComponent(EditorBar bar, BarComponent component) {
+        Objects.requireNonNull(bar, "bar");
+        Objects.requireNonNull(component, "component");
+        if (!Platform.isFxApplicationThread()) {
+            throw new IllegalStateException("Editor bar components must be installed on the JavaFX thread");
+        }
+
+        BarLayout layout = bars.computeIfAbsent(bar, this::createBar);
+        HBox target = component.side() == BarSide.LEFT ? layout.left() : layout.right();
+        target.getChildren().add(component.node());
+    }
+
+    private BarLayout createBar(EditorBar bar) {
+        HBox left = new HBox();
+        HBox right = new HBox();
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox container = new HBox(left, spacer, right);
+        container.getStyleClass().addAll("monaco-editor-bar",
+                bar == EditorBar.HEADER ? "monaco-editor-header-bar" : "monaco-editor-status-bar");
+        left.getStyleClass().addAll("monaco-editor-bar-section", "left");
+        right.getStyleClass().addAll("monaco-editor-bar-section", "right");
+
+        if (bar == EditorBar.HEADER) {
+            editorLayout.setTop(container);
+        } else {
+            editorLayout.setBottom(container);
+        }
+        return new BarLayout(left, right);
+    }
+
+    private void configureBars() {
+        if (barsConfigured) {
+            return;
+        }
+        barsConfigured = true;
+        installBarComponents(EditorBar.HEADER, createHeaderBarComponents());
+        installBarComponents(EditorBar.STATUS, createStatusBarComponents());
+    }
+
+    private void installBarComponents(EditorBar bar, Collection<BarComponent> components) {
+        if (components == null) {
+            return;
+        }
+        for (BarComponent component : components) {
+            installBarComponent(bar, Objects.requireNonNull(component,
+                    "Bar component collections must not contain null"));
+        }
+    }
+
+    @Override
+    protected void layoutChildren() {
+        // The first layout happens after subclass construction, avoiding overridable callbacks from
+        // the MonacoEditorView constructor.
+        configureBars();
+        super.layoutChildren();
+    }
+
+    private record BarLayout(HBox left, HBox right) {
     }
 
     public String getDocumentUri() {
@@ -476,7 +602,8 @@ public class MonacoEditorView extends StackPane {
 
         String js = "window.MonacoBridge && window.MonacoBridge.openDocument({" + "uri:" + jsString(
                 uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(
-                theme) + "," + "highlighterServiceUrl:" + jsString(
+                theme) + "," + "showLineNumbers:" + showLineNumbers + "," + "minimapVisible:" +
+                showMinimap + "," + "highlighterServiceUrl:" + jsString(
                 highlighterServiceUrl) + "," + "text:" + jsString(text) + "});";
 
         safeExec(js);
@@ -495,6 +622,7 @@ public class MonacoEditorView extends StackPane {
      * Toggle line number visibility.
      */
     public void setLineNumbers(boolean show) {
+        showLineNumbers = show;
         safeExec("window.MonacoBridge && window.MonacoBridge.setLineNumbers(" + show + ");");
     }
 
@@ -502,10 +630,167 @@ public class MonacoEditorView extends StackPane {
      * Query current line numbers visibility. Defaults to true if unknown.
      */
     public boolean isLineNumbersVisible() {
-        Object result = safeEval(
-                "(window.MonacoBridge && window.MonacoBridge.isLineNumbersVisible) ? window.MonacoBridge" + ".isLineNumbersVisible() : true");
-        if (result instanceof Boolean b) return b;
-        return true;
+        return showLineNumbers;
+    }
+
+    /** Change the active Monaco theme without recreating the document model. */
+    public void setTheme(String theme) {
+        if (theme == null || theme.isBlank()) {
+            throw new IllegalArgumentException("Monaco theme must not be blank");
+        }
+        initialTheme = theme;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setTheme(" + jsString(theme) + ");");
+    }
+
+    /** Return the last theme requested through {@link #loadEditor} or {@link #setTheme}. */
+    public String getTheme() {
+        return initialTheme;
+    }
+
+    /** Toggle Monaco's document minimap. */
+    public void setMinimapVisible(boolean show) {
+        showMinimap = show;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setMinimapVisible(" + show + ");");
+    }
+
+    /** Return the requested minimap visibility, including requests made before Monaco was ready. */
+    public boolean isMinimapVisible() {
+        return showMinimap;
+    }
+
+    /**
+     * A clickable marker displayed in Monaco's glyph margin while review mode is enabled.
+     *
+     * @param id             unique, stable marker identifier
+     * @param lineNumber     one-based document line
+     * @param icon           text glyph to display (for example "●", "?", or "✓")
+     * @param color          any CSS color understood by the embedded browser
+     * @param size           icon size in pixels (clamped to 8..32 by the JavaScript bridge)
+     * @param tooltip        optional hover text
+     * @param action         optional application-defined action identifier
+     * @param responsibility optional application-defined owner or responsibility identifier
+     */
+    public record ReviewMarker(String id, int lineNumber, String icon, String color, int size,
+                               String tooltip, String action, String responsibility) {
+        public ReviewMarker(String id, int lineNumber, String icon, String color, int size,
+                            String tooltip) {
+            this(id, lineNumber, icon, color, size, tooltip, null, null);
+        }
+
+        public ReviewMarker(String id, int lineNumber) {
+            this(id, lineNumber, "●", "#4f8cff", 16, null, null, null);
+        }
+
+        public ReviewMarker {
+            if (id == null || id.isBlank()) {
+                throw new IllegalArgumentException("Review marker id must not be blank");
+            }
+            if (lineNumber < 1) {
+                throw new IllegalArgumentException("Review marker lineNumber must be at least 1");
+            }
+        }
+    }
+
+    /**
+     * Information reported when a review marker is clicked.
+     */
+    public record ReviewMarkerClick(String id, int lineNumber, String action, String responsibility) {
+    }
+
+    /**
+     * Enable or disable review mode. The glyph margin and its review markers are only visible while
+     * review mode is enabled; configured markers are retained when it is disabled.
+     */
+    public void setReviewMode(boolean enabled) {
+        reviewMode = enabled;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMode(" + enabled + ");");
+    }
+
+    public boolean isReviewMode() {
+        return reviewMode;
+    }
+
+    /**
+     * Replace all review markers. Duplicate ids are rejected.
+     */
+    public void setReviewMarkers(Collection<ReviewMarker> markers) {
+        Objects.requireNonNull(markers, "markers");
+        Map<String, ReviewMarker> replacement = new LinkedHashMap<>();
+        for (ReviewMarker marker : markers) {
+            Objects.requireNonNull(marker, "markers must not contain null");
+            if (replacement.putIfAbsent(marker.id(), marker) != null) {
+                throw new IllegalArgumentException("Duplicate review marker id: " + marker.id());
+            }
+        }
+        synchronized (reviewMarkers) {
+            reviewMarkers.clear();
+            reviewMarkers.putAll(replacement);
+            serializeAndReplayReviewMarkers();
+        }
+    }
+
+    /**
+     * Add or replace one review marker, identified by its id.
+     */
+    public void putReviewMarker(ReviewMarker marker) {
+        Objects.requireNonNull(marker, "marker");
+        synchronized (reviewMarkers) {
+            reviewMarkers.put(marker.id(), marker);
+            serializeAndReplayReviewMarkers();
+        }
+    }
+
+    /**
+     * Remove one review marker by id.
+     */
+    public void removeReviewMarker(String id) {
+        if (id == null) return;
+        synchronized (reviewMarkers) {
+            if (reviewMarkers.remove(id) != null) {
+                serializeAndReplayReviewMarkers();
+            }
+        }
+    }
+
+    private void serializeAndReplayReviewMarkers() {
+        try {
+            pendingReviewMarkersJson = new ObjectMapper().writeValueAsString(reviewMarkers.values());
+            replayReviewMarkers();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Could not serialize review markers", e);
+        }
+    }
+
+    /**
+     * Remove all configured review markers without changing review mode.
+     */
+    public void clearReviewMarkers() {
+        synchronized (reviewMarkers) {
+            reviewMarkers.clear();
+            pendingReviewMarkersJson = "[]";
+            safeExec("window.MonacoBridge && window.MonacoBridge.clearReviewMarkers();");
+        }
+    }
+
+    /**
+     * Set the callback invoked on the JavaFX application thread when a review marker is clicked.
+     */
+    public void setOnReviewMarkerClicked(Consumer<ReviewMarkerClick> listener) {
+        reviewMarkerClickListener = listener;
+    }
+
+    /**
+     * Set the callback invoked when the user double-clicks an empty glyph-margin cell in review
+     * mode. The consumer receives the one-based document line number on the JavaFX application
+     * thread. Double-clicks directly on an existing review marker are excluded.
+     */
+    public void setOnReviewMarginDoubleClicked(Consumer<Integer> listener) {
+        reviewMarginDoubleClickListener = listener;
+    }
+
+    private void replayReviewMarkers() {
+        safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMarkers(" +
+                pendingReviewMarkersJson + ");");
     }
 
 
@@ -518,6 +803,24 @@ public class MonacoEditorView extends StackPane {
         Object result = safeEval(
                 "window.MonacoBridge && window.MonacoBridge.getText ? window.MonacoBridge.getText() : ''");
         return result != null ? result.toString() : "";
+    }
+
+    /**
+     * Establish the current contents as the saved baseline. Call this after a successful save
+     * initiated outside Monaco's built-in Ctrl/Cmd+S command, such as from a header-bar button.
+     */
+    public void markSaved() {
+        safeExec("window.MonacoBridge && window.MonacoBridge.markSaved();");
+    }
+
+    /**
+     * Establish a specific successfully persisted snapshot as the saved baseline. This overload is
+     * suitable for asynchronous saves: edits made while the save is in flight remain dirty.
+     */
+    public void markSaved(String savedText) {
+        String baseline = savedText == null ? "" : savedText;
+        initialText = baseline;
+        safeExec("window.MonacoBridge && window.MonacoBridge.markSaved(" + jsString(baseline) + ");");
     }
 
     /**
@@ -796,6 +1099,12 @@ public class MonacoEditorView extends StackPane {
             replayPendingHighlighterCaches();
             Platform.runLater(() -> {
                 initEditor(initialText, initialLanguage, initialTheme);
+                safeExec("window.MonacoBridge && window.MonacoBridge.setLineNumbers(" +
+                        showLineNumbers + ");");
+                safeExec("window.MonacoBridge && window.MonacoBridge.setMinimapVisible(" +
+                        showMinimap + ");");
+                safeExec("window.MonacoBridge && window.MonacoBridge.setReviewMode(" + reviewMode + ");");
+                replayReviewMarkers();
                 replayPendingCursorPosition();
                 replayPendingEditorFocus();
                 // initEditor and setDiagnostics both enqueue JavaScript work through safeExec. Keep
@@ -821,15 +1130,37 @@ public class MonacoEditorView extends StackPane {
         }
 
         public void onSave(String text) {
+            String savedText = text == null ? "" : text;
+            initialText = savedText;
             if (onSaveListener != null) {
-                Platform.runLater(() -> onSaveListener.accept(text == null ? "" : text));
+                Platform.runLater(() -> onSaveListener.accept(savedText));
             }
+        }
+
+        public void onSavedBaselineChanged(String text) {
+            initialText = text == null ? "" : text;
         }
 
         public void onDirtyChanged(boolean dirty) {
             isDirty = dirty;
             if (onDirtyChangedListener != null) {
                 Platform.runLater(() -> onDirtyChangedListener.accept(dirty));
+            }
+        }
+
+        public void onReviewMarkerClicked(String id, int lineNumber, String action,
+                                          String responsibility) {
+            Consumer<ReviewMarkerClick> listener = reviewMarkerClickListener;
+            if (listener != null) {
+                ReviewMarkerClick click = new ReviewMarkerClick(id, lineNumber, action, responsibility);
+                Platform.runLater(() -> listener.accept(click));
+            }
+        }
+
+        public void onReviewMarginDoubleClicked(int lineNumber) {
+            Consumer<Integer> listener = reviewMarginDoubleClickListener;
+            if (listener != null && lineNumber > 0) {
+                Platform.runLater(() -> listener.accept(lineNumber));
             }
         }
 
@@ -870,19 +1201,4 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
-    // Small utility to ensure WebView tracks parent size without external CSS
-    private static final class RegionU {
-        static double width(Node n) {
-            return 800;
-        }
-
-        static double height(Node n) {
-            return 600;
-        }
-
-        static void bindToParent(StackPane parent, DebugWebView child) {
-            child.prefWidthProperty().bind(parent.widthProperty());
-            child.prefHeightProperty().bind(parent.heightProperty());
-        }
-    }
 }
