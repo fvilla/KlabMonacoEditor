@@ -87,6 +87,15 @@ public class MonacoEditorView extends StackPane {
     private volatile JSObject window;
     private Consumer<Integer> cursorPositionListener;
     private Consumer<String> onSaveListener;
+    private Supplier<? extends java.util.concurrent.CompletionStage<org.integratedmodelling.klab.api.knowledge.Observable>> observableComposer;
+
+    /** Ctrl+Shift+Space requests an observable from the host. Null means cancellation.
+     * The host runs on the FX thread; completion may arrive on any thread. */
+    public void setOnComposeObservable(
+            Supplier<? extends java.util.concurrent.CompletionStage<org.integratedmodelling.klab.api.knowledge.Observable>> composer) {
+        this.observableComposer = composer;
+    }
+
     private Consumer<Boolean> onDirtyChangedListener;
     private Consumer<ReviewMarkerClick> reviewMarkerClickListener;
     private Consumer<Integer> reviewMarginDoubleClickListener;
@@ -1068,6 +1077,18 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
+    private void finishComposition(JSObject sourceWindow, String requestId, String urn) {
+        Platform.runLater(() -> {
+            if (sourceWindow == null || window != sourceWindow) return;
+            try {
+                if (sourceWindow.getMember("MonacoBridge") instanceof JSObject bridge)
+                    bridge.call("completeObservableComposition", requestId, getScene() == null ? null : urn);
+            } catch (RuntimeException failure) {
+                System.err.println("[MonacoEditorView] Cannot return composed observable: " + failure);
+            }
+        });
+    }
+
     private static String escapeHtml(String s) {
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
@@ -1077,6 +1098,26 @@ public class MonacoEditorView extends StackPane {
      */
     @SuppressWarnings("unused")
     public class JavaBridge {
+
+        public void onComposeObservable(String requestId) {
+            JSObject sourceWindow = window;
+            Platform.runLater(() -> {
+                if (window != sourceWindow) return;
+                try {
+                    var result = observableComposer == null ? null : observableComposer.get();
+                    if (result == null) finishComposition(sourceWindow, requestId, null);
+                    else result.whenComplete((observable, failure) -> {
+                        if (failure != null) System.err.println("[MonacoEditorView] Observable composition failed: " + failure);
+                        finishComposition(sourceWindow, requestId,
+                                failure == null && observable != null ? observable.getUrn() : null);
+                    });
+                } catch (Exception failure) {
+                    System.err.println("[MonacoEditorView] Observable composition failed: " + failure);
+                    finishComposition(sourceWindow, requestId, null);
+                }
+            });
+        }
+
 
         public void onEditorReady() {
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");

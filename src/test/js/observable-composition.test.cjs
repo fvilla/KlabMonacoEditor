@@ -1,0 +1,74 @@
+const {test} = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+
+function fixture() {
+  const commands = new Map(), requests = [], dirty = [], changes = [];
+  let model, position = {lineNumber: 1, column: 3}, readOnly = false, stops = 0, focuses = 0;
+  const makeModel = (text, uri) => {
+    let version = 1; const listeners = [];
+    return {uri, getValue: () => text, getVersionId: () => version, isDisposed: () => false,
+      getOffsetAt: p => p.column - 1, getPositionAt: offset => ({lineNumber: 1, column: offset + 1}),
+      onDidChangeContent: fn => { listeners.push(fn); return {dispose() {}}; },
+      setValue(value) {text = value; version++; listeners.forEach(fn => fn({changes: []}));},
+      getLineCount: () => 1};
+  };
+  const editor = {getModel: () => model, setModel: value => model = value,
+    getPosition: () => position, setPosition: value => position = value,
+    getOption: () => readOnly, addCommand: (key, fn) => commands.set(key, fn),
+    onDidChangeCursorPosition() {}, onKeyDown() {}, onMouseDown() {},
+    deltaDecorations: () => [], updateOptions() {}, getDomNode: () => null,
+    pushUndoStop() { stops++; }, focus() {focuses++;},
+    executeEdits(source, edits) {
+      changes.push({source, edits}); const edit = edits[0], offset = edit.range.startColumn - 1;
+      model.setValue(model.getValue().slice(0, offset) + edit.text + model.getValue().slice(offset));
+    }
+  };
+  const monaco = {KeyMod: {CtrlCmd: 1, Shift: 2}, KeyCode: {Space: 4, KeyS: 8, KeyC: 16, KeyX: 32, KeyV: 64},
+    Uri: {parse: value => ({toString: () => value})},
+    Range: class {constructor(a,b,c,d) {this.startLineNumber=a;this.startColumn=b;this.endLineNumber=c;this.endColumn=d;}},
+    languages: {getLanguages: () => []},
+    editor: {EditorOption: {readOnly: 1}, create: () => editor, getModel: () => null,
+      createModel: makeModel, setTheme() {}, defineTheme() {}, setModelMarkers() {}}
+  };
+  const element = {style: {}, appendChild() {}, addEventListener() {}, setAttribute() {}};
+  const window = {JavaBridge: {onComposeObservable: id => requests.push(id), onDirtyChanged: value => dirty.push(value)},
+    setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame() {}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.js'), 'utf8'),
+    {window, monaco, document: {head: element, getElementById: () => null, createElement: () => element, addEventListener() {}},
+      console: {log() {}, warn() {}, error() {}}, setTimeout: () => 0, clearTimeout() {}});
+  const api = window.MonacoBridge;
+  api._onAmdReady(element); api.openDocument({uri: 'test:first', text: 'abcd', language: 'plaintext'});
+  return {api, requests, dirty, changes, invoke: () => commands.get(7)(),
+    text: () => model.getValue(), position: () => position, stops: () => stops, focuses: () => focuses,
+    change: value => model.setValue(value), readOnly: value => readOnly = value};
+}
+
+test('shortcut returns a URN at the captured cursor, as one dirty undoable edit', () => {
+  const f = fixture(); f.invoke(); f.invoke(); assert.equal(f.requests.length, 1);
+  f.api.completeObservableComposition(f.requests[0], 'biology:Species of each biology:Tree');
+  assert.equal(f.text(), 'abbiology:Species of each biology:Treecd');
+  assert.equal(f.changes.length, 1); assert.equal(f.stops(), 2);
+  assert.equal(f.position().column, 3 + 'biology:Species of each biology:Tree'.length);
+  assert.equal(f.dirty.at(-1), true); assert.equal(f.focuses(), 1);
+  f.api.completeObservableComposition(f.requests[0], 'duplicate'); assert.equal(f.changes.length, 1);
+});
+
+test('cancel and stale request IDs do not edit and cancellation permits another request', () => {
+  const f = fixture(); f.invoke();
+  f.api.completeObservableComposition('wrong-id', 'wrong'); assert.equal(f.changes.length, 0);
+  f.api.completeObservableComposition(f.requests[0], null); assert.equal(f.text(), 'abcd');
+  assert.equal(f.stops(), 0); f.invoke(); assert.equal(f.requests.length, 2);
+});
+
+test('changed, rebound and read-only documents reject late insertion', () => {
+  const f = fixture(); f.invoke(); f.change('updated');
+  f.api.completeObservableComposition(f.requests[0], 'late'); assert.equal(f.text(), 'updated');
+  f.invoke(); f.api.openDocument({uri: 'test:second', text: 'second', language: 'plaintext'});
+  f.api.completeObservableComposition(f.requests[1], 'late'); assert.equal(f.text(), 'second');
+  f.readOnly(true); f.invoke(); assert.equal(f.requests.length, 2);
+  f.readOnly(false); f.invoke(); f.readOnly(true);
+  f.api.completeObservableComposition(f.requests[2], 'late'); assert.equal(f.text(), 'second');
+});

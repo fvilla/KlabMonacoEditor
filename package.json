@@ -3,7 +3,8 @@
     "monaco-editor": "0.54.0"
   },
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "npm run build && node --test src/test/js/*.test.cjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

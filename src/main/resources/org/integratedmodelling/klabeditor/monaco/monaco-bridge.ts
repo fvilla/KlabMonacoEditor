@@ -30,6 +30,7 @@ interface MonacoBridgeApi {
 
     setCursorPosition(offset: number): void;
     focusEditor(): void;
+    completeObservableComposition(requestId: string, urn: string | null): void;
 
     setLineNumbers(show: boolean): void;
 
@@ -1036,6 +1037,23 @@ function isCopyCutPaste(e: any) {
         state._wheelNormalizerInstalled = true;
     }
 
+    let compositionSequence = 0;
+    let pendingComposition: {id: string, model: any, version: number, position: any} | null = null;
+
+    function requestObservableComposition() {
+        const editor = state.editor;
+        const model = editor?.getModel();
+        const host = (window as any).JavaBridge;
+        if (pendingComposition || !model || editor.getOption(monaco.editor.EditorOption.readOnly)
+            || !host?.onComposeObservable) return;
+        const position = editor.getPosition();
+        if (!position) return;
+        const id = String(++compositionSequence);
+        pendingComposition = {id, model, version: model.getVersionId(), position};
+        try { host.onComposeObservable(id); }
+        catch (error) { pendingComposition = null; logError("Observable composer callback failed", error); }
+    }
+
     function ensureEditorCreated(theme: string, language: string) {
         if (!state.container) {
             console.error('Monaco container not available');
@@ -1087,6 +1105,10 @@ function isCopyCutPaste(e: any) {
 //         } catch { }
 //       });
 //     } catch { }
+
+        // Host-provided composer. Higher priority than Monaco's parameter-hints shortcut.
+        state.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Space,
+            requestObservableComposition);
 
         // Save keybinding
         try {
@@ -1344,6 +1366,26 @@ function isCopyCutPaste(e: any) {
 
     // @ts-ignore
     const api: MonacoBridgeApi = {
+        completeObservableComposition(requestId: string, urn: string | null) {
+            const pending = pendingComposition;
+            if (!pending || pending.id !== requestId) return;
+            pendingComposition = null;
+            const editor = state.editor;
+            if (!editor || editor.getModel() !== pending.model || pending.model.isDisposed()) return;
+            if (urn && pending.model.getVersionId() === pending.version
+                && !editor.getOption(monaco.editor.EditorOption.readOnly)) {
+                const position = pending.position;
+                const offset = pending.model.getOffsetAt(position);
+                editor.pushUndoStop();
+                editor.executeEdits("observable-composer", [{
+                    range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                    text: urn, forceMoveMarkers: true
+                }]);
+                editor.setPosition(pending.model.getPositionAt(offset + urn.length));
+                editor.pushUndoStop();
+            }
+            editor.focus();
+        },
         _onAmdReady(container: HTMLElement) {
             state.container = container;
 

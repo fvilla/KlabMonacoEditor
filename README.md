@@ -253,3 +253,15 @@ To launch the included demonstration application:
 ```shell
 ./mvnw javafx:run
 ```
+
+### Host-provided observable composer
+
+Register `setOnComposeObservable(() -> completionStage)` to handle **Ctrl+Shift+Space**
+(Cmd+Shift+Space on macOS). The supplier runs on the JavaFX thread and returns an asynchronous
+`Observable`, or `null` on cancellation. The library inserts its URN at the invoking cursor as one
+undoable edit, using the existing content/dirty/LSP notification path. It never marks the edit saved.
+Repeated shortcuts while a request is pending are ignored. A result is discarded if the model was
+replaced, edited, disposed or made read-only; a page reload also invalidates its Java callback.
+The IDE supplies the UI and decides whether composition has any action beyond returning a value.
+
+`npm test` compiles the bridge and runs its focused Node regression tests.
