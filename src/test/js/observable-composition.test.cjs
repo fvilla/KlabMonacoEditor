@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 function fixture() {
+  const markers = new Map();
   const commands = new Map(), requests = [], dirty = [], changes = [];
   let model, position = {lineNumber: 1, column: 3}, readOnly = false, stops = 0, focuses = 0;
   const makeModel = (text, uri) => {
@@ -26,12 +27,12 @@ function fixture() {
       model.setValue(model.getValue().slice(0, offset) + edit.text + model.getValue().slice(offset));
     }
   };
-  const monaco = {KeyMod: {CtrlCmd: 1, Shift: 2}, KeyCode: {Space: 4, KeyS: 8, KeyC: 16, KeyX: 32, KeyV: 64},
+  const monaco = {MarkerSeverity: {Error: 8, Warning: 4, Info: 2, Hint: 1}, KeyMod: {CtrlCmd: 1, Shift: 2}, KeyCode: {Space: 4, KeyS: 8, KeyC: 16, KeyX: 32, KeyV: 64},
     Uri: {parse: value => ({toString: () => value})},
     Range: class {constructor(a,b,c,d) {this.startLineNumber=a;this.startColumn=b;this.endLineNumber=c;this.endColumn=d;}},
     languages: {getLanguages: () => []},
     editor: {EditorOption: {readOnly: 1}, create: () => editor, getModel: () => null,
-      createModel: makeModel, setTheme() {}, defineTheme() {}, setModelMarkers() {}}
+      createModel: makeModel, setTheme() {}, defineTheme() {}, setModelMarkers(model, owner, values) {markers.set(owner, values);}, getModelMarkers({owner}) {return markers.get(owner) || [];}}
   };
   const element = {style: {}, appendChild() {}, addEventListener() {}, setAttribute() {}};
   const window = {JavaBridge: {onComposeObservable: id => requests.push(id), onDirtyChanged: value => dirty.push(value)},
@@ -41,7 +42,7 @@ function fixture() {
       console: {log() {}, warn() {}, error() {}}, setTimeout: () => 0, clearTimeout() {}});
   const api = window.MonacoBridge;
   api._onAmdReady(element); api.openDocument({uri: 'test:first', text: 'abcd', language: 'plaintext'});
-  return {api, requests, dirty, changes, invoke: () => commands.get(7)(),
+  return {api, markers, requests, dirty, changes, invoke: () => commands.get(7)(),
     text: () => model.getValue(), position: () => position, stops: () => stops, focuses: () => focuses,
     change: value => model.setValue(value), readOnly: value => readOnly = value};
 }
@@ -71,4 +72,40 @@ test('changed, rebound and read-only documents reject late insertion', () => {
   f.readOnly(true); f.invoke(); assert.equal(f.requests.length, 2);
   f.readOnly(false); f.invoke(); f.readOnly(true);
   f.api.completeObservableComposition(f.requests[2], 'late'); assert.equal(f.text(), 'second');
+});
+
+
+test('semantic markers have independent ownership and retain lexical offsets', () => {
+  const f = fixture();
+  f.api.setSemanticMarkers([{offset: 1, length: 2, message: 'Invalid endpoint', severity: 'error'}]);
+  f.api.createMarkerByOffset(0, 1, 'Parser warning', 'warning');
+  f.api.setDiagnostics([{message: 'LSP warning'}]);
+  const semantic = f.markers.get('klab-semantics');
+  assert.equal(semantic[0].startColumn, 2); assert.equal(semantic[0].endColumn, 4);
+  assert.equal(semantic[0].severity, 8);
+  f.api.clearMarkers();
+  assert.equal(f.markers.get('klab-semantics').length, 1);
+  f.api.setSemanticMarkers([]);
+  assert.equal(f.markers.get('klab-semantics').length, 0);
+  assert.equal(f.markers.get('kim-lsp').length, 1);
+});
+
+
+test('a queued semantic response for superseded text does not replace current markers', () => {
+  const f = fixture();
+  f.api.setSemanticMarkers([{offset: 0, length: 1, message: 'Current', severity: 'error'}], 'abcd');
+  f.change('new source');
+  f.api.setSemanticMarkers([{offset: 1, length: 1, message: 'Late', severity: 'error'}], 'abcd');
+  assert.equal(f.markers.get('klab-semantics')[0].message, 'Current');
+  f.api.setSemanticMarkers([]);
+  assert.equal(f.markers.get('klab-semantics').length, 0);
+});
+
+
+test('semantic markers use parsed-source positions across CRLF normalization', () => {
+  const f = fixture(); f.change('first\ninvalid');
+  f.api.setSemanticMarkers([{offset: 7, length: 7, message: 'Invalid', severity: 'error'}], 'first\r\ninvalid');
+  const marker = f.markers.get('klab-semantics')[0];
+  assert.equal(marker.startLineNumber, 2); assert.equal(marker.startColumn, 1);
+  assert.equal(marker.endLineNumber, 2); assert.equal(marker.endColumn, 8);
 });

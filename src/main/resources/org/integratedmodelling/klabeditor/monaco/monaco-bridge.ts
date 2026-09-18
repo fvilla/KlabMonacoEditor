@@ -54,6 +54,7 @@ interface MonacoBridgeApi {
 
     // Diagnostics API (replaces window.kim_setDiagnostics)
     setDiagnostics(markers: any[]): void;
+    setSemanticMarkers(markers: any[], expectedSource?: string): void;
 
     clearDiagnostics(): void;
 
@@ -1650,6 +1651,28 @@ function isCopyCutPaste(e: any) {
                 } catch (e) {
                     logError("Failed to apply diagnostics", e);
                 }
+            });
+        },
+
+        setSemanticMarkers(markers: any[], expectedSource?: string) {
+            ensureReady(() => {
+                const model = state.editor?.getModel?.();
+                if (!model) return;
+                const normalize = (text: string) => text.replace(/\r\n?/g, "\n");
+                if (expectedSource != null && normalize(model.getValue()) !== normalize(expectedSource)) return;
+                // Source offsets refer to the parsed text, which may use CRLF while Monaco uses LF.
+                const positionAt = (offset: number) => {
+                    if (expectedSource == null) return model.getPositionAt(offset);
+                    const lines = normalize(expectedSource.slice(0, Math.max(0, offset))).split("\n");
+                    return {lineNumber: lines.length, column: lines[lines.length - 1].length + 1};
+                };
+                monaco.editor.setModelMarkers(model, "klab-semantics", (markers || []).map(marker => {
+                    const start = positionAt(Math.max(0, marker.offset));
+                    const end = positionAt(Math.max(0, marker.offset) + Math.max(1, marker.length));
+                    return {startLineNumber: start.lineNumber, startColumn: start.column,
+                        endLineNumber: end.lineNumber, endColumn: end.column,
+                        message: marker.message, severity: toSeverity(marker.severity)};
+                }));
             });
         },
 

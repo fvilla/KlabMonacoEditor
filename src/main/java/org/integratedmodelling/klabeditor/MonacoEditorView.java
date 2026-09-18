@@ -547,6 +547,34 @@ public class MonacoEditorView extends StackPane {
         }
     }
 
+    /** Replace semantic markers without touching parser or LSP diagnostics. */
+    public void markSemanticNotifications(Collection<Notification> notifications) {
+        markSemanticNotifications(notifications, null);
+    }
+
+    /** Reject a late marker update if Monaco's text no longer matches the validated source. */
+    public void markSemanticNotifications(Collection<Notification> notifications, String expectedSource) {
+        var markers = new java.util.ArrayList<java.util.Map<String, Object>>();
+        for (var notification : notifications) {
+            var location = notification.getLexicalContext();
+            if (location == null) continue;
+            markers.add(java.util.Map.of("offset", location.getOffsetInDocument(),
+                    "length", location.getLength(), "message", notification.getMessage(),
+                    "severity", switch (notification.getLevel()) {
+                        case Error, SystemError -> "error";
+                        case Warning -> "warning";
+                        default -> "info";
+                    }));
+        }
+        try {
+            String json = new ObjectMapper().writeValueAsString(markers);
+            safeExec("window.MonacoBridge && window.MonacoBridge.setSemanticMarkers(" + json + ","
+                    + (expectedSource == null ? "null" : jsString(expectedSource)) + ");");
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalArgumentException("Cannot serialize semantic diagnostics", e);
+        }
+    }
+
     private void markNotification(Notification.LexicalContext lexicalContext, Notification.Level level,
                                   String message) {
         createMarkerByOffset(lexicalContext.getOffsetInDocument(), lexicalContext.getLength(), message,
