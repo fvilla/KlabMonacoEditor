@@ -1041,6 +1041,17 @@ function isCopyCutPaste(e: any) {
     let compositionSequence = 0;
     let pendingComposition: {id: string, model: any, version: number, position: any} | null = null;
 
+    function conceptAtPosition(model: any, position: any): string | null {
+        const line = model.getLineContent?.(position.lineNumber) || '';
+        const offset = position.column - 1;
+        conceptPattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = conceptPattern.exec(line)) !== null) {
+            if (offset >= match.index && offset <= match.index + match[0].length) return match[0];
+        }
+        return null;
+    }
+
     function requestObservableComposition() {
         const editor = state.editor;
         const model = editor?.getModel();
@@ -1049,9 +1060,12 @@ function isCopyCutPaste(e: any) {
             || !host?.onComposeObservable) return;
         const position = editor.getPosition();
         if (!position) return;
+        const selection = editor.getSelection?.();
+        const selectedText = selection && !selection.isEmpty?.()
+            ? model.getValueInRange(selection) : null;
         const id = String(++compositionSequence);
         pendingComposition = {id, model, version: model.getVersionId(), position};
-        try { host.onComposeObservable(id); }
+        try { host.onComposeObservable(id, selectedText, conceptAtPosition(model, position)); }
         catch (error) { pendingComposition = null; logError("Observable composer callback failed", error); }
     }
 

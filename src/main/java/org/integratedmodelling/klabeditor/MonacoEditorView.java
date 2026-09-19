@@ -32,6 +32,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -87,12 +88,27 @@ public class MonacoEditorView extends StackPane {
     private volatile JSObject window;
     private Consumer<Integer> cursorPositionListener;
     private Consumer<String> onSaveListener;
-    private Supplier<? extends java.util.concurrent.CompletionStage<org.integratedmodelling.klab.api.knowledge.Observable>> observableComposer;
+    private Function<ObservableCompositionContext,
+            ? extends java.util.concurrent.CompletionStage<org.integratedmodelling.klab.api.knowledge.Observable>> observableComposer;
+
+    /** Editor state captured when observable composition is requested. */
+    public record ObservableCompositionContext(String selectedText, String conceptAtCursor) {
+    }
 
     /** Ctrl+Shift+Space requests an observable from the host. Null means cancellation.
      * The host runs on the FX thread; completion may arrive on any thread. */
     public void setOnComposeObservable(
             Supplier<? extends java.util.concurrent.CompletionStage<org.integratedmodelling.klab.api.knowledge.Observable>> composer) {
+        this.observableComposer = composer == null ? null : ignored -> composer.get();
+    }
+
+    /**
+     * Register a composer that can initialize itself from the selection or concept at the invoking
+     * cursor. Both context values may be null.
+     */
+    public void setOnComposeObservable(
+            Function<ObservableCompositionContext,
+                    ? extends java.util.concurrent.CompletionStage<org.integratedmodelling.klab.api.knowledge.Observable>> composer) {
         this.observableComposer = composer;
     }
 
@@ -1127,12 +1143,16 @@ public class MonacoEditorView extends StackPane {
     @SuppressWarnings("unused")
     public class JavaBridge {
 
-        public void onComposeObservable(String requestId) {
+        public void onComposeObservable(
+                String requestId, String selectedText, String conceptAtCursor) {
             JSObject sourceWindow = window;
             Platform.runLater(() -> {
                 if (window != sourceWindow) return;
                 try {
-                    var result = observableComposer == null ? null : observableComposer.get();
+                    var context = new ObservableCompositionContext(
+                            selectedText == null || selectedText.isBlank() ? null : selectedText,
+                            conceptAtCursor == null || conceptAtCursor.isBlank() ? null : conceptAtCursor);
+                    var result = observableComposer == null ? null : observableComposer.apply(context);
                     if (result == null) finishComposition(sourceWindow, requestId, null);
                     else result.whenComplete((observable, failure) -> {
                         if (failure != null) System.err.println("[MonacoEditorView] Observable composition failed: " + failure);

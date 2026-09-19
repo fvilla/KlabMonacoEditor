@@ -260,6 +260,9 @@ Register `setOnComposeObservable(() -> completionStage)` to handle **Ctrl+Shift+
 (Cmd+Shift+Space on macOS). The supplier runs on the JavaFX thread and returns an asynchronous
 `Observable`, or `null` on cancellation. The library inserts its URN at the invoking cursor as one
 undoable edit, using the existing content/dirty/LSP notification path. It never marks the edit saved.
+Hosts that need editor context can instead register the overload accepting an
+`ObservableCompositionContext`; it supplies the active selection and any concept identifier under
+the cursor.
 Repeated shortcuts while a request is pending are ignored. A result is discarded if the model was
 replaced, edited, disposed or made read-only; a page reload also invalidates its Java callback.
 The IDE supplies the UI and decides whether composition has any action beyond returning a value.
