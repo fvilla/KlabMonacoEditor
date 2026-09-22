@@ -30,6 +30,7 @@ interface MonacoBridgeApi {
 
     setCursorPosition(offset: number): void;
     focusEditor(): void;
+    completeObservableComposition(requestId: string, urn: string | null): void;
 
     setLineNumbers(show: boolean): void;
 
@@ -53,6 +54,7 @@ interface MonacoBridgeApi {
 
     // Diagnostics API (replaces window.kim_setDiagnostics)
     setDiagnostics(markers: any[]): void;
+    setSemanticMarkers(markers: any[], expectedSource?: string): void;
 
     clearDiagnostics(): void;
 
@@ -1040,6 +1042,37 @@ function isCopyCutPaste(e: any) {
         state._wheelNormalizerInstalled = true;
     }
 
+    let compositionSequence = 0;
+    let pendingComposition: {id: string, model: any, version: number, position: any} | null = null;
+
+    function conceptAtPosition(model: any, position: any): string | null {
+        const line = model.getLineContent?.(position.lineNumber) || '';
+        const offset = position.column - 1;
+        conceptPattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = conceptPattern.exec(line)) !== null) {
+            if (offset >= match.index && offset <= match.index + match[0].length) return match[0];
+        }
+        return null;
+    }
+
+    function requestObservableComposition() {
+        const editor = state.editor;
+        const model = editor?.getModel();
+        const host = (window as any).JavaBridge;
+        if (pendingComposition || !model || editor.getOption(monaco.editor.EditorOption.readOnly)
+            || !host?.onComposeObservable) return;
+        const position = editor.getPosition();
+        if (!position) return;
+        const selection = editor.getSelection?.();
+        const selectedText = selection && !selection.isEmpty?.()
+            ? model.getValueInRange(selection) : null;
+        const id = String(++compositionSequence);
+        pendingComposition = {id, model, version: model.getVersionId(), position};
+        try { host.onComposeObservable(id, selectedText, conceptAtPosition(model, position)); }
+        catch (error) { pendingComposition = null; logError("Observable composer callback failed", error); }
+    }
+
     function ensureEditorCreated(theme: string, language: string) {
         if (!state.container) {
             console.error('Monaco container not available');
@@ -1091,6 +1124,10 @@ function isCopyCutPaste(e: any) {
 //         } catch { }
 //       });
 //     } catch { }
+
+        // Host-provided composer. Higher priority than Monaco's parameter-hints shortcut.
+        state.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Space,
+            requestObservableComposition);
 
         // Save keybinding
         try {
@@ -1348,6 +1385,26 @@ function isCopyCutPaste(e: any) {
 
     // @ts-ignore
     const api: MonacoBridgeApi = {
+        completeObservableComposition(requestId: string, urn: string | null) {
+            const pending = pendingComposition;
+            if (!pending || pending.id !== requestId) return;
+            pendingComposition = null;
+            const editor = state.editor;
+            if (!editor || editor.getModel() !== pending.model || pending.model.isDisposed()) return;
+            if (urn && pending.model.getVersionId() === pending.version
+                && !editor.getOption(monaco.editor.EditorOption.readOnly)) {
+                const position = pending.position;
+                const offset = pending.model.getOffsetAt(position);
+                editor.pushUndoStop();
+                editor.executeEdits("observable-composer", [{
+                    range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                    text: urn, forceMoveMarkers: true
+                }]);
+                editor.setPosition(pending.model.getPositionAt(offset + urn.length));
+                editor.pushUndoStop();
+            }
+            editor.focus();
+        },
         _onAmdReady(container: HTMLElement) {
             state.container = container;
 
@@ -1612,6 +1669,28 @@ function isCopyCutPaste(e: any) {
                 } catch (e) {
                     logError("Failed to apply diagnostics", e);
                 }
+            });
+        },
+
+        setSemanticMarkers(markers: any[], expectedSource?: string) {
+            ensureReady(() => {
+                const model = state.editor?.getModel?.();
+                if (!model) return;
+                const normalize = (text: string) => text.replace(/\r\n?/g, "\n");
+                if (expectedSource != null && normalize(model.getValue()) !== normalize(expectedSource)) return;
+                // Source offsets refer to the parsed text, which may use CRLF while Monaco uses LF.
+                const positionAt = (offset: number) => {
+                    if (expectedSource == null) return model.getPositionAt(offset);
+                    const lines = normalize(expectedSource.slice(0, Math.max(0, offset))).split("\n");
+                    return {lineNumber: lines.length, column: lines[lines.length - 1].length + 1};
+                };
+                monaco.editor.setModelMarkers(model, "klab-semantics", (markers || []).map(marker => {
+                    const start = positionAt(Math.max(0, marker.offset));
+                    const end = positionAt(Math.max(0, marker.offset) + Math.max(1, marker.length));
+                    return {startLineNumber: start.lineNumber, startColumn: start.column,
+                        endLineNumber: end.lineNumber, endColumn: end.column,
+                        message: marker.message, severity: toSeverity(marker.severity)};
+                }));
             });
         },
 
