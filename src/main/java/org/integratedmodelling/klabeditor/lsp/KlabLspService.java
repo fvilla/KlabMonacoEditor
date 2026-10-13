@@ -43,6 +43,10 @@ public class KlabLspService {
     private LanguageDescriptor languageConfig;
     private Map<String, String> conceptMap = new HashMap<>();
 
+    // A successful singleton session cannot be reused by another server or user scope.
+    // Keep the owner for this session's lifetime; replacing it requires a separate lifecycle.
+    private LocalInstance initializedServer;
+    private UserScope initializedScope;
     private volatile boolean initialized = false;
 
     private KlabLspService() {
@@ -76,12 +80,12 @@ public class KlabLspService {
      */
     public synchronized boolean ensureInitialized(LocalInstance lspServer, UserScope scope) {
 
-        if (lspServer.getStatus() != LocalInstance.Status.RUNNING) {
+        if (lspServer == null || scope == null || lspServer.getStatus() != LocalInstance.Status.RUNNING) {
             return false;
         }
 
         if (initialized) {
-            return true;
+            return lspServer == initializedServer && scope == initializedScope;
         }
 
         try {
@@ -105,6 +109,8 @@ public class KlabLspService {
             server.initialize(params).get(60, TimeUnit.SECONDS);
             server.initialized(new InitializedParams());
 
+            initializedServer = lspServer;
+            initializedScope = scope;
             initialized = true;
         } catch (Exception e) {
             // the nightmare was that a closed outputstream was coming out of the instance. Hopefully

@@ -129,6 +129,7 @@ public class MonacoEditorView extends StackPane {
     private boolean editorRendered;
 
     // Memorize last requested init so we can re-apply if needed
+    private boolean useSharedLspMetadata = true;
     private String initialText = "";
     private String initialLanguage = "plaintext";
     private String initialTheme = "vs-dark";
@@ -601,6 +602,11 @@ public class MonacoEditorView extends StackPane {
                 });
     }
 
+    /** Disable implicit singleton metadata when the host must verify session ownership first. */
+    public void setUseSharedLspMetadata(boolean enabled) {
+        useSharedLspMetadata = enabled;
+    }
+
     /**
      * Initialize the editor with provided content and configuration. This can be called multiple times;
      * subsequent calls will update the model text and language.
@@ -643,11 +649,13 @@ public class MonacoEditorView extends StackPane {
 
         String uri = (documentUri != null && !documentUri.isBlank()) ? documentUri :
                 "inmemory:///untitled" + ".kim";
-        var keywords = KlabLspService.getInstance().getLanguageKeywords(language);
-        if (keywords != null && !keywords.isEmpty()) {
-            preloadKeywordHighlighterCache(language, keywords);
+        if (useSharedLspMetadata) {
+            var keywords = KlabLspService.getInstance().getLanguageKeywords(language);
+            if (keywords != null && !keywords.isEmpty()) {
+                preloadKeywordHighlighterCache(language, keywords);
+            }
+            preloadConceptHighlighterCache(KlabLspService.getInstance().getConceptCache());
         }
-        preloadConceptHighlighterCache(KlabLspService.getInstance().getConceptCache());
 
         //        System.out.println(
         //                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" +
