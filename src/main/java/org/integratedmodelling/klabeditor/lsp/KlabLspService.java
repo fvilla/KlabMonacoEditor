@@ -39,6 +39,12 @@ public class KlabLspService {
     private LanguageServer server;
     private Launcher<LanguageServer> launcher;
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    // UI callbacks must never wait for a JSON-RPC pipe write. Preserve didOpen/change/close order.
+    private final ExecutorService documentMessages = Executors.newSingleThreadExecutor(task -> {
+        var thread = new Thread(task, "klab-lsp-document-messages");
+        thread.setDaemon(true);
+        return thread;
+    });
     private int versionCounter = 1;
     private LanguageDescriptor languageConfig;
     private Map<String, String> conceptMap = new HashMap<>();
@@ -168,6 +174,10 @@ public class KlabLspService {
     }
 
     public void openDocument(String uri, String languageId, String text) {
+        if (initialized) documentMessages.execute(() -> sendOpenDocument(uri, languageId, text));
+    }
+
+    private void sendOpenDocument(String uri, String languageId, String text) {
         if (!initialized) return;
 
         Integer existingVersion = docVersions.putIfAbsent(uri, 1);
@@ -175,7 +185,7 @@ public class KlabLspService {
             System.out.println(
                     "[LSP] openDocument called for already-open uri=" + uri + " version=" + existingVersion +
                             " -> syncing with didChange");
-            changeDocument(uri, text);
+            sendChangeDocument(uri, text);
             return;
         }
 
@@ -200,6 +210,10 @@ public class KlabLspService {
     }
 
     public void changeDocument(String uri, String newText) {
+        if (initialized) documentMessages.execute(() -> sendChangeDocument(uri, newText));
+    }
+
+    private void sendChangeDocument(String uri, String newText) {
         if (!initialized) return;
 
         Integer current = docVersions.get(uri);
@@ -234,6 +248,10 @@ public class KlabLspService {
     }
 
     public void closeDocument(String uri) {
+        if (initialized) documentMessages.execute(() -> sendCloseDocument(uri));
+    }
+
+    private void sendCloseDocument(String uri) {
         if (!initialized) return;
         try {
             TextDocumentIdentifier id = new TextDocumentIdentifier(uri);
@@ -261,7 +279,9 @@ public class KlabLspService {
         Position pos = new Position(line, character);
         CompletionParams params = new CompletionParams(new TextDocumentIdentifier(uri),
                 new Position(line, character));
-        return server.getTextDocumentService().completion(params);
+        // Completion must observe all document messages submitted before it.
+        return CompletableFuture.supplyAsync(() -> server.getTextDocumentService().completion(params), documentMessages)
+                .thenCompose(Function.identity());
     }
 
 }
