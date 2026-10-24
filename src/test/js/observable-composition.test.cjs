@@ -6,7 +6,7 @@ const path = require('node:path');
 
 function fixture() {
   const markers = new Map();
-  const commands = new Map(), requests = [], dirty = [], changes = [];
+  const commands = new Map(), requests = [], dirty = [], changes = [], saves = [];
   let model, position = {lineNumber: 1, column: 3}, selection = null;
   let readOnly = false, stops = 0, focuses = 0;
   const makeModel = (text, uri) => {
@@ -42,12 +42,13 @@ function fixture() {
   const window = {JavaBridge: {onComposeObservable: (id, selectedText, conceptAtCursor) =>
       requests.push({id, selectedText, conceptAtCursor}), onDirtyChanged: value => dirty.push(value)},
     setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame() {}};
+  window.JavaBridge.onSave = text => saves.push(text);
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.js'), 'utf8'),
     {window, monaco, document: {head: element, getElementById: () => null, createElement: () => element, addEventListener() {}},
       console: {log() {}, warn() {}, error() {}}, setTimeout: () => 0, clearTimeout() {}});
   const api = window.MonacoBridge;
   api._onAmdReady(element); api.openDocument({uri: 'test:first', text: 'abcd', language: 'plaintext'});
-  return {api, markers, requests, dirty, changes, invoke: () => commands.get(7)(),
+  return {api, markers, requests, dirty, changes, saves, save: () => commands.get(9)(), invoke: () => commands.get(7)(),
     text: () => model.getValue(), position: () => position, stops: () => stops, focuses: () => focuses,
     change: value => model.setValue(value), readOnly: value => readOnly = value,
     select: (startColumn, endColumn) => {
@@ -56,6 +57,18 @@ function fixture() {
       position = {lineNumber: 1, column: endColumn};
     }};
 }
+
+test('asynchronous save stays dirty until the host acknowledges the persisted snapshot', () => {
+  const f = fixture();
+  f.api.setSaveAcknowledgementRequired(true);
+  f.change('edited'); f.save();
+  assert.deepEqual(f.saves, ['edited']);
+  assert.equal(f.dirty.at(-1), true);
+  f.api.markSaved('edited');
+  assert.equal(f.dirty.at(-1), false);
+  f.change('newer'); f.api.markSaved('edited');
+  assert.equal(f.dirty.at(-1), true);
+});
 
 test('shortcut returns a URN at the captured cursor, as one dirty undoable edit', () => {
   const f = fixture(); f.invoke(); f.invoke(); assert.equal(f.requests.length, 1);

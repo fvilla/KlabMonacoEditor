@@ -7,6 +7,23 @@ through LSP4J.
 The Monaco JavaScript, CSS, and bridge resources are packaged in the library, so the editor runs
 without downloading web assets at runtime.
 
+## Supporting files and Markdown
+
+`FileLanguageSupport.languageForPath(path)` selects a language from the bundled Monaco distribution
+for CSS, Markdown, JSON, JavaScript/TypeScript, XML, localization properties, and common source files.
+Unknown text uses `plaintext`; `isPlainText(path)` lets hosts retain a lightweight editor for notes.
+These grammars work without connecting a k.LAB language server.
+
+`MarkdownPreview` provides a separate offline rendered view, with tables, task lists, strikethrough,
+autolinks, and fenced code. Call `renderHtml(source, dark)` off the UI thread, then `showRendered(html)`
+on the JavaFX thread. Raw HTML is escaped; scripting and remote resource loading are disabled.
+
+Hosts saving through an asynchronous API should call `editor.setSaveAcknowledgementRequired(true)`
+before `loadEditor`. Ctrl/Cmd+S then requests a save without advancing the saved baseline. Only after
+persistence succeeds should the host call `editor.markSaved(savedSnapshot)`. Failed saves remain dirty,
+and edits newer than an acknowledged snapshot stay dirty. The default preserves existing synchronous
+save behavior. Call `close()` on short-lived editor and preview instances when disposing their views.
+
 ## Requirements
 
 - Java 21

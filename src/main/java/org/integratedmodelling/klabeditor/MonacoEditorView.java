@@ -60,7 +60,9 @@ import java.util.function.Supplier;
  * https://github.com/Barahlush/monaco-lsp-guide A bare WebSocket is not enough. The included bridge exposes a
  * stub "connectLsp" method with extensive comments on how to wire it once you bundle the required libraries.
  */
-public class MonacoEditorView extends StackPane {
+public class MonacoEditorView extends StackPane implements AutoCloseable {
+    private volatile boolean disposed;
+    private boolean saveAcknowledgementRequired;
 
     private final DebugWebView webView = new DebugWebView(false);
     private final WebEngine webEngine = webView.getEngine();
@@ -436,6 +438,7 @@ public class MonacoEditorView extends StackPane {
 
     private ChangeListener<Worker.State> pageLoadListener() {
         return (obs, old, state) -> {
+            if (disposed) return;
             if (state == Worker.State.SUCCEEDED) {
                 pageLoaded.set(true);
                 editorJsReady.set(false); // Reset: JS must confirm readiness via onEditorReady()
@@ -661,7 +664,7 @@ public class MonacoEditorView extends StackPane {
         //                "[MonacoEditorView] initEditor uri=" + uri + " language=" + language + " theme=" +
         //                theme);
 
-        String js = "window.MonacoBridge && window.MonacoBridge.openDocument({" + "uri:" + jsString(
+        String js = "window.MonacoBridge && window.MonacoBridge.openDocument({saveAcknowledgementRequired:" + saveAcknowledgementRequired + "," + "uri:" + jsString(
                 uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(
                 theme) + "," + "showLineNumbers:" + showLineNumbers + "," + "minimapVisible:" +
                 showMinimap + "," + "highlighterServiceUrl:" + jsString(
@@ -892,6 +895,25 @@ public class MonacoEditorView extends StackPane {
         this.onSaveListener = onSave;
     }
 
+    /** Keep Ctrl/Cmd+S dirty until the host confirms persistence with markSaved(savedText). */
+    public void setSaveAcknowledgementRequired(boolean required) {
+        saveAcknowledgementRequired = required;
+        safeExec("window.MonacoBridge && window.MonacoBridge.setSaveAcknowledgementRequired(" + required + ");");
+    }
+
+    /** Release the embedded document and readiness timer when a short-lived editor closes. */
+    @Override public void close() {
+        if (disposed) return;
+        disposed = true;
+        if (readinessWatchdog != null) readinessWatchdog.stop();
+        synchronized (editorRenderedCallbacks) { editorRenderedCallbacks.clear(); }
+        onSaveListener = null; onDirtyChangedListener = null; changeListener = null;
+        cursorPositionListener = null;
+        pageLoaded.set(false); editorJsReady.set(false);
+        webEngine.load(null);
+        getChildren().clear();
+    }
+
     /**
      * Set a callback to be notified when the editor dirty state changes.
      * true means there are unsaved changes; false means the content matches last saved baseline.
@@ -1044,12 +1066,14 @@ public class MonacoEditorView extends StackPane {
     // -------------- Java<->JS glue helpers --------------
 
     private void safeExec(String script) {
+        if (disposed) return;
         if (!pageLoaded.get()) {
             System.out.println("[MonacoEditorView] JS exec skipped (page not loaded)");
             return;
         }
 
         Platform.runLater(() -> {
+            if (disposed) return;
             try {
                 webEngine.executeScript(script);
             } catch (Throwable t) {
@@ -1176,6 +1200,7 @@ public class MonacoEditorView extends StackPane {
 
 
         public void onEditorReady() {
+            if (disposed) return;
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
             boolean firstReadySignal = editorJsReady.compareAndSet(false, true);
             loadRetryCount = 0; // Success — reset retry counter for any future reloads
@@ -1217,6 +1242,7 @@ public class MonacoEditorView extends StackPane {
         }
 
         public void onEditorRendered() {
+            if (disposed) return;
             notifyEditorRendered();
         }
 
@@ -1228,7 +1254,7 @@ public class MonacoEditorView extends StackPane {
 
         public void onSave(String text) {
             String savedText = text == null ? "" : text;
-            initialText = savedText;
+            if (!saveAcknowledgementRequired) initialText = savedText;
             if (onSaveListener != null) {
                 Platform.runLater(() -> onSaveListener.accept(savedText));
             }

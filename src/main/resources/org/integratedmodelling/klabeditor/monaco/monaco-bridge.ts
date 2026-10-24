@@ -6,6 +6,7 @@
 declare const monaco: any;
 
 interface MonacoOpenDoc {
+    saveAcknowledgementRequired?: boolean;
     uri: string;
     text: string;
     language?: string;
@@ -16,6 +17,7 @@ interface MonacoOpenDoc {
 }
 
 interface MonacoBridgeApi {
+    setSaveAcknowledgementRequired(required: boolean): void;
     // New preferred API
     openDocument(doc: MonacoOpenDoc): void;
 
@@ -236,6 +238,7 @@ function isCopyCutPaste(e: any) {
         pendingCalls: Array<() => void>,
         savedText: string,
         dirty: boolean,
+        saveAcknowledgementRequired: boolean,
         highlighterServiceUrl: string,
         activeLanguageSpec?: KlabLanguageSpec | null,
         semanticDecorationIds: string[],
@@ -259,6 +262,7 @@ function isCopyCutPaste(e: any) {
         pendingCalls: [],
         savedText: '',
         dirty: false,
+        saveAcknowledgementRequired: false,
         highlighterServiceUrl: DEFAULT_HIGHLIGHTER_SERVICE_URL,
         activeLanguageSpec: null,
         semanticDecorationIds: [],
@@ -1135,10 +1139,10 @@ function isCopyCutPaste(e: any) {
                 try {
                     const model = state.editor.getModel?.();
                     const textNow = model ? (model.getValue?.() || '') : (state.editor.getValue?.() || '');
-                    if (model) {
+                    if (model && !state.saveAcknowledgementRequired) {
                         markModelSaved(model);
                     }
-                    // Advance the baseline before application code can inspect or modify the editor.
+                    // Asynchronous hosts acknowledge success explicitly through markSaved(snapshot).
                     (window as any).JavaBridge?.onSave?.(textNow);
                 } catch (e) {
                     logError("Save command failed", e);
@@ -1428,6 +1432,7 @@ function isCopyCutPaste(e: any) {
         },
 
         openDocument(doc: MonacoOpenDoc) {
+            state.saveAcknowledgementRequired = !!doc.saveAcknowledgementRequired;
             ensureReady(async () => {
                 try {
                     if (!doc || !doc.uri) {
@@ -1585,6 +1590,10 @@ function isCopyCutPaste(e: any) {
 
         isLineNumbersVisible(): boolean {
             return !!state.showLineNumbers;
+        },
+
+        setSaveAcknowledgementRequired(required: boolean) {
+            state.saveAcknowledgementRequired = !!required;
         },
 
         markSaved(savedText?: string) {

@@ -8,6 +8,14 @@ module org.integratedmodelling.klabeditor {
     requires javafx.controls;
     requires javafx.fxml;
     requires javafx.web;
+    requires java.xml;
+    requires flexmark;
+    requires flexmark.util.data;
+    requires flexmark.util.ast;
+    requires flexmark.ext.tables;
+    requires flexmark.ext.gfm.strikethrough;
+    requires flexmark.ext.gfm.tasklist;
+    requires flexmark.ext.autolink;
     requires org.eclipse.lsp4j;
     requires org.eclipse.lsp4j.jsonrpc;
     requires klab.core.api;
