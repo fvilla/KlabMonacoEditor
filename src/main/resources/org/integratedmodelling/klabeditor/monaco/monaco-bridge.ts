@@ -13,7 +13,6 @@ interface MonacoOpenDoc {
     theme?: string;
     showLineNumbers?: boolean;
     minimapVisible?: boolean;
-    highlighterServiceUrl?: string;
 }
 
 interface MonacoBridgeApi {
@@ -66,11 +65,10 @@ interface MonacoBridgeApi {
 
     createMarkerByOffset(offset: number, length: number, message: string, severity?: 'info' | 'warning' | 'error' | 'hint'): void;
 
-    configureHighlighter(serviceUrl: string): void;
 
-    preloadConceptHighlighterCache(concepts: any): void;
 
     preloadKeywordHighlighterCache(keywords: any): void;
+    conceptClassificationsChanged(): void;
 
     connectLsp(wsUrl: string, languageId?: string): Promise<boolean>; // unused in klab-ide integration
     _onAmdReady(container: HTMLElement): void;
@@ -130,7 +128,6 @@ function isCopyCutPaste(e: any) {
 (function () {
     const OWNER_DIAGNOSTICS = "kim-lsp";
     const OWNER_MARKERS = "java-bridge";
-    const DEFAULT_HIGHLIGHTER_SERVICE_URL = "http://localhost:8765";
 
     type KlabLanguageName = "kim" | "kactor" | "worldview" | "observation";
 
@@ -146,8 +143,8 @@ function isCopyCutPaste(e: any) {
         {
             name: "kactor",
             id: "org.integratedmodelling.languages.KActors",
-            aliases: ["k.Actors", "kactor"],
-            extensions: [".kactor"]
+            aliases: ["k.Actors", "kactor", "kactors"],
+            extensions: [".kactor", ".kactors"]
         },
         {
             name: "worldview",
@@ -158,7 +155,7 @@ function isCopyCutPaste(e: any) {
         {
             name: "observation",
             id: "org.integratedmodelling.languages.Observation",
-            aliases: ["k.Observation", "observation"],
+            aliases: ["k.Observation", "observation", "obs"],
             extensions: [".obs", ".observation"]
         }
     ];
@@ -213,15 +210,16 @@ function isCopyCutPaste(e: any) {
         SEMANTIC_MODIFIER: [212, 212, 212]
     };
 
-    const TOKEN_COLORS: { [token: string]: string } = {};
     const registeredLanguages: { [id: string]: boolean } = {};
+    const registeredFormatters: { [id: string]: boolean } = {};
     const keywordCache: { [name: string]: string[] } = {};
-    const conceptCategoryCache: { [concept: string]: string } = {};
-    const urnStatusCache: { [urn: string]: string } = {};
+    const conceptReference = /(?:^|[^\w.:-])([a-z_]+(?:\.[a-z_-]+)*:[A-Z][A-Za-z_0-9]*)\b/g;
+    // Protect comments, strings and embedded expressions while collecting concept references.
+    const conceptSpans = /\/\/[^\r\n]*|\/\*[\s\S]*?(?:\*\/|$)|"(?:\\[\s\S]|[^"\\])*(?:"|$)|'(?:\\[\s\S]|[^'\\])*(?:'|$)|\[(?:\\[\s\S]|[^\]\\])*(?:\]|$)|(?:^|[^\w.:-])([a-z_]+(?:\.[a-z_-]+)*:[A-Z][A-Za-z_0-9]*)\b/g;
+    let conceptScanGeneration = 0;
+    let conceptRanges: {model: any, version: number, references: Map<string, any[]>} | null = null;
+    const conceptClassifications = new Map<string, string | null>();
 
-    const conceptPattern = /\b[a-z]+(?:\.[a-z]+)*:[A-Z][A-Za-z0-9]*\b/g;
-    const conceptExactPattern = /^[a-z]+(?:\.[a-z]+)*:[A-Z][A-Za-z0-9]*$/;
-    const urnPattern = /\b[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*:[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+)*(?:#[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?(?:,[A-Za-z_][A-Za-z0-9_]*(?:=[^,\s\]\)\};]+)?)*)?/g;
 
     const state: {
         editor: any | null,
@@ -239,7 +237,6 @@ function isCopyCutPaste(e: any) {
         savedText: string,
         dirty: boolean,
         saveAcknowledgementRequired: boolean,
-        highlighterServiceUrl: string,
         activeLanguageSpec?: KlabLanguageSpec | null,
         semanticDecorationIds: string[],
         semanticScanTimer?: number | null,
@@ -263,7 +260,6 @@ function isCopyCutPaste(e: any) {
         savedText: '',
         dirty: false,
         saveAcknowledgementRequired: false,
-        highlighterServiceUrl: DEFAULT_HIGHLIGHTER_SERVICE_URL,
         activeLanguageSpec: null,
         semanticDecorationIds: [],
         semanticScanTimer: null,
@@ -503,11 +499,6 @@ function isCopyCutPaste(e: any) {
         return null;
     }
 
-    function serviceUrl(path: string): string {
-        const base = (state.highlighterServiceUrl || DEFAULT_HIGHLIGHTER_SERVICE_URL).replace(/\/+$/, "");
-        return base + path;
-    }
-
     function installKlabTheme(baseTheme: string) {
         const rules: any[] = [
             {token: "klab.keyword", foreground: rgb("KEYWORD").substring(1), fontStyle: "bold"},
@@ -523,7 +514,6 @@ function isCopyCutPaste(e: any) {
 
         for (const name in COLOR_RGB) {
             const token = "klab." + tokenName(name);
-            TOKEN_COLORS[tokenName(name)] = rgb(name);
             rules.push({token, foreground: rgb(name).substring(1)});
         }
 
@@ -647,16 +637,6 @@ function isCopyCutPaste(e: any) {
         };
     }
 
-    async function fetchJson(path: string): Promise<any> {
-        try {
-            const response = await fetch(serviceUrl(path), {cache: "no-store"});
-            if (!response.ok) return null;
-            return await response.json();
-        } catch (e) {
-            return null;
-        }
-    }
-
     function normalizeKeywordPayload(payload: any): string[] {
         if (!payload) return [];
         if (Array.isArray(payload)) return payload.filter((x) => typeof x === "string");
@@ -726,14 +706,6 @@ function isCopyCutPaste(e: any) {
         });
     }
 
-    async function loadKeywords(spec: KlabLanguageSpec): Promise<string[]> {
-        if (Object.prototype.hasOwnProperty.call(keywordCache, spec.name)) return keywordCache[spec.name];
-        const payload = await fetchJson("/" + encodeURIComponent(spec.name) + "/keywords");
-        const keywords = normalizeKeywordPayload(payload);
-        keywordCache[spec.name] = keywords;
-        return keywords;
-    }
-
     function registerKlabLanguage(spec: KlabLanguageSpec, keywords: string[]) {
         if (!registeredLanguages[spec.id]) {
             try {
@@ -750,6 +722,20 @@ function isCopyCutPaste(e: any) {
                 extensions: spec.extensions
             });
             registeredLanguages[spec.id] = true;
+        }
+
+        if (!registeredFormatters[spec.id]) {
+            monaco.languages.registerDocumentFormattingEditProvider(spec.id, {
+                displayName: "k.LAB",
+                provideDocumentFormattingEdits(model: any, _options: any, token: any) {
+                    if (token.isCancellationRequested) return [];
+                    return KlabFormatting.lineEdits(model.getLinesContent(), spec.name).map(edit => ({
+                        range: new monaco.Range(edit.line, 1, edit.line, model.getLineMaxColumn(edit.line)),
+                        text: edit.text.join(model.getEOL())
+                    }));
+                }
+            });
+            registeredFormatters[spec.id] = true;
         }
 
         monaco.languages.setMonarchTokensProvider(spec.id, createKlabMonarch(keywords));
@@ -777,19 +763,6 @@ function isCopyCutPaste(e: any) {
         });
     }
 
-    async function ensureKlabLanguage(language: string): Promise<KlabLanguageSpec | null> {
-        const spec = normalizeLanguage(language);
-        if (!spec) return null;
-        registerKlabLanguage(spec, keywordCache[spec.name] || []);
-        const keywords = await loadKeywords(spec);
-        registerKlabLanguage(spec, keywords);
-        try {
-            monaco.editor.tokenize("", spec.id);
-        } catch {
-        }
-        return spec;
-    }
-
     function installSemanticStyles() {
         if (document.getElementById("klab-semantic-style")) return;
         const style = document.createElement("style");
@@ -801,157 +774,75 @@ function isCopyCutPaste(e: any) {
             css += `.monaco-editor.vs-dark .${tokenName(name)}{color:${darkRgb(name)} !important;}`;
         }
         css += ".monaco-editor .klab-abstract{font-style:italic !important;}";
-        css += ".monaco-editor .klab-urn-online{color:#006600 !important;font-weight:bold;}";
-        css += ".monaco-editor .klab-urn-offline{color:#606060 !important;font-weight:bold;}";
-        css += ".monaco-editor .klab-urn-error{color:#ff0000 !important;}";
-        css += ".monaco-editor .klab-urn-unknown{color:#808080 !important;font-style:italic;}";
-        css += ".monaco-editor.vs-dark .klab-urn-online{color:#69c98a !important;}";
-        css += ".monaco-editor.vs-dark .klab-urn-offline{color:#c0c0c0 !important;}";
-        css += ".monaco-editor.vs-dark .klab-urn-error{color:#ff7b7b !important;}";
-        css += ".monaco-editor.vs-dark .klab-urn-unknown{color:#c4c4c4 !important;}";
         style.textContent = css;
         document.head.appendChild(style);
     }
 
-    async function conceptClass(concept: string): Promise<string> {
-        if (!conceptCategoryCache[concept]) {
-            // Categories may include an ABSTRACT modifier, e.g. "QUALITY ABSTRACT".
-            // GET /concept/<URL-encoded concept> -> "QUALITY" or { "category": "QUALITY", "abstract": true }.
-            const payload = await fetchJson("/concept/" + encodeURIComponent(concept));
-            conceptCategoryCache[concept] = ((typeof payload === "string" ? payload : payload?.category) || "UNKNOWN").toUpperCase()
-                + (payload?.abstract === true ? " ABSTRACT" : "");
-        }
-        const categoryAndModifiers = conceptCategoryCache[concept].trim().split(/\s+/);
-        return tokenName(categoryAndModifiers[0])
-            + (categoryAndModifiers.indexOf("ABSTRACT") >= 1 ? " klab-abstract" : "");
-    }
-
-    function preloadConceptEntry(concept: string, category?: string | null): Promise<void> {
-        if (!concept || !conceptExactPattern.test(concept)) {
-            return Promise.resolve();
-        }
-
-        if (category && typeof category === "string") {
-            conceptCategoryCache[concept] = category.toUpperCase();
-            return Promise.resolve();
-        }
-
-        if (conceptCategoryCache[concept]) {
-            return Promise.resolve();
-        }
-
-        return conceptClass(concept).then(() => undefined);
-    }
-
-    function preloadConceptCache(concepts: any): Promise<void[]> {
-        const work: Promise<void>[] = [];
-        if (!concepts) return Promise.resolve([]);
-
-        if (Array.isArray(concepts)) {
-            for (const item of concepts) {
-                if (typeof item === "string") {
-                    work.push(preloadConceptEntry(item, null));
-                } else if (item && typeof item.concept === "string") {
-                    work.push(preloadConceptEntry(item.concept, item.category || item.color || null));
-                }
-            }
-            return Promise.all(work);
-        }
-
-        if (typeof concepts === "object") {
-            for (const concept in concepts) {
-                if (Object.prototype.hasOwnProperty.call(concepts, concept)) {
-                    work.push(preloadConceptEntry(concept, concepts[concept]));
-                }
-            }
-        }
-
-        return Promise.all(work);
-    }
-
-    async function urnClass(urn: string): Promise<string> {
-        const baseUrn = urn.split("#")[0];
-        if (!urnStatusCache[baseUrn]) {
-            // Required service endpoint: GET /urn/<URL-encoded URN-without-#suffix> -> "ONLINE" or { "status": "ONLINE" }.
-            const payload = await fetchJson("/urn/" + encodeURIComponent(baseUrn));
-            urnStatusCache[baseUrn] = ((typeof payload === "string" ? payload : payload?.status) || "UNKNOWN").toUpperCase();
-        }
-        switch (urnStatusCache[baseUrn]) {
-            case "ONLINE":
-                return "klab-urn-online";
-            case "OFFLINE":
-                return "klab-urn-offline";
-            case "ERROR":
-                return "klab-urn-error";
-            case "UNKNOWN":
-            default:
-                return "klab-urn-unknown";
-        }
-    }
-
     function scheduleSemanticHighlight() {
-        if (state.semanticScanTimer != null) {
-            window.clearTimeout(state.semanticScanTimer);
-        }
-        state.semanticScanTimer = window.setTimeout(() => {
-            state.semanticScanTimer = null;
-            refreshSemanticHighlight();
-        }, 250);
+        const generation = ++conceptScanGeneration;
+        if (state.semanticScanTimer != null) window.clearTimeout(state.semanticScanTimer);
+        state.semanticScanTimer = window.setTimeout(() => refreshSemanticHighlight(generation), 150);
     }
 
-    function squareBracketRanges(text: string): Array<{ start: number, end: number }> {
-        const ranges: Array<{ start: number, end: number }> = [];
-        const stack: number[] = [];
-        for (let i = 0; i < text.length; i++) {
-            const ch = text.charAt(i);
-            if (ch === "[") {
-                stack.push(i);
-            } else if (ch === "]" && stack.length) {
-                ranges.push({start: stack.pop()!, end: i + 1});
-            }
-        }
-        return ranges;
-    }
-
-    function isInsideRange(offset: number, ranges: Array<{ start: number, end: number }>): boolean {
-        for (const range of ranges) {
-            if (offset >= range.start && offset < range.end) return true;
-        }
-        return false;
-    }
-
-    async function refreshSemanticHighlight() {
+    function refreshSemanticHighlight(generation: number) {
         const editor = state.editor;
         const model = editor?.getModel?.();
-        if (!editor || !model || !state.activeLanguageSpec) return;
-
-        const text = model.getValue() || "";
-        const groovyRanges = squareBracketRanges(text);
+        if (!model || !state.activeLanguageSpec || generation !== conceptScanGeneration) return;
+        const version = model.getVersionId();
+        if (conceptRanges?.model !== model) conceptClassifications.clear();
+        if (conceptRanges?.model !== model || conceptRanges.version !== version) {
+            const text = model.getValue();
+            const references = new Map<string, any[]>();
+            conceptSpans.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = conceptSpans.exec(text)) !== null) {
+                const concept = match[1];
+                if (!concept) continue;
+                const offset = match.index + match[0].length - concept.length;
+                const start = model.getPositionAt(offset);
+                const end = model.getPositionAt(offset + concept.length);
+                const range = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+                const ranges = references.get(concept);
+                if (ranges) ranges.push(range);
+                else references.set(concept, [range]);
+            }
+            conceptRanges = {model, version, references};
+        }
+        const references = conceptRanges.references;
+        const concepts = Array.from(references.keys());
         const decorations: any[] = [];
-        const addDecoration = async (match: RegExpExecArray, cssClass: string | Promise<string>) => {
-            const className = await cssClass;
-            const start = model.getPositionAt(match.index);
-            const end = model.getPositionAt(match.index + match[0].length);
-            decorations.push({
-                range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
-                options: {inlineClassName: className, inlineClassNameAffectsLetterSpacing: true}
-            });
+        let first = 0;
+
+        const applyBatch = () => {
+            state.semanticScanTimer = null;
+            if (generation !== conceptScanGeneration || editor.getModel() !== model
+                || model.getVersionId() !== version || model.isDisposed()) return;
+            const batch = concepts.slice(first, first + 128);
+            const host = (window as any).JavaBridge;
+            const missing = batch.filter(concept => !conceptClassifications.has(concept));
+            if (missing.length && host?.classifyConcepts) {
+                const categories = JSON.parse(host.classifyConcepts(JSON.stringify(missing)));
+                for (const concept of missing) conceptClassifications.set(concept, categories[concept] || null);
+            }
+            for (const concept of batch) {
+                const classification = conceptClassifications.get(concept);
+                if (!classification) continue;
+                const [category, ...modifiers] = classification.split(/\s+/);
+                const inlineClassName = tokenName(category)
+                    + (modifiers.indexOf("ABSTRACT") >= 0 ? " klab-abstract" : "");
+                for (const range of references.get(concept)) {
+                    decorations.push({range, options: {inlineClassName,
+                        inlineClassNameAffectsLetterSpacing: modifiers.indexOf("ABSTRACT") >= 0}});
+                }
+            }
+            first += batch.length;
+            if (first < concepts.length) {
+                state.semanticScanTimer = window.setTimeout(applyBatch, 0);
+            } else {
+                state.semanticDecorationIds = editor.deltaDecorations(state.semanticDecorationIds, decorations);
+            }
         };
-
-        let match: RegExpExecArray | null;
-        conceptPattern.lastIndex = 0;
-        while ((match = conceptPattern.exec(text)) !== null) {
-            if (isInsideRange(match.index, groovyRanges)) continue;
-            await addDecoration(match, conceptClass(match[0]));
-        }
-
-        urnPattern.lastIndex = 0;
-        while ((match = urnPattern.exec(text)) !== null) {
-            if (isInsideRange(match.index, groovyRanges)) continue;
-            await addDecoration(match, urnClass(match[0]));
-        }
-
-        state.semanticDecorationIds = editor.deltaDecorations(state.semanticDecorationIds, decorations);
+        applyBatch();
     }
 
     function installWheelNormalizer() {
@@ -1052,10 +943,12 @@ function isCopyCutPaste(e: any) {
     function conceptAtPosition(model: any, position: any): string | null {
         const line = model.getLineContent?.(position.lineNumber) || '';
         const offset = position.column - 1;
-        conceptPattern.lastIndex = 0;
+        conceptReference.lastIndex = 0;
         let match: RegExpExecArray | null;
-        while ((match = conceptPattern.exec(line)) !== null) {
-            if (offset >= match.index && offset <= match.index + match[0].length) return match[0];
+        while ((match = conceptReference.exec(line)) !== null) {
+            const concept = match[1];
+            const end = match.index + match[0].length;
+            if (offset >= end - concept.length && offset <= end) return concept;
         }
         return null;
     }
@@ -1442,10 +1335,6 @@ function isCopyCutPaste(e: any) {
 
                     logInfo(`Opening document ${doc.uri}`);
 
-                    if (doc.highlighterServiceUrl) {
-                        state.highlighterServiceUrl = doc.highlighterServiceUrl;
-                    }
-
                     let language = doc.language || 'plaintext';
                     const theme = doc.theme || 'vs-dark';
                     state.theme = theme;
@@ -1460,16 +1349,6 @@ function isCopyCutPaste(e: any) {
                     if (spec) {
                         language = spec.id;
                         registerKlabLanguage(spec, keywordCache[spec.name] || []);
-                        ensureKlabLanguage(language).then(() => {
-                            const model = state.editor?.getModel?.();
-                            if (model) {
-                                try {
-                                    monaco.editor.setModelLanguage(model, language);
-                                } catch {
-                                }
-                                scheduleSemanticHighlight();
-                            }
-                        });
                     } else if (state.editor) {
                         state.semanticDecorationIds = state.editor.deltaDecorations(state.semanticDecorationIds, []);
                     }
@@ -1486,6 +1365,9 @@ function isCopyCutPaste(e: any) {
                     const nextUri = uri.toString?.() || doc.uri;
                     const isSwitchingDocument = previousUri !== nextUri;
                     state._currentUri = uri;
+                    if (isSwitchingDocument && state.semanticDecorationIds.length) {
+                        state.semanticDecorationIds = state.editor.deltaDecorations(state.semanticDecorationIds, []);
+                    }
 
                     let model = monaco.editor.getModel(uri);
                     if (!model) {
@@ -1753,20 +1635,9 @@ function isCopyCutPaste(e: any) {
             });
         },
 
-        configureHighlighter(serviceUrl: string) {
-            state.highlighterServiceUrl = (serviceUrl || DEFAULT_HIGHLIGHTER_SERVICE_URL).replace(/\/+$/, "");
-            // A URL change must not discard metadata explicitly preloaded by Java. The HTTP
-            // highlighter is optional and, in the IDE, normally absent; clearing here used to turn
-            // a complete keyword cache into an empty result from a failed fetch.
-            for (const key in urnStatusCache) delete urnStatusCache[key];
-            const spec = state.activeLanguageSpec;
-            if (spec) {
-                ensureKlabLanguage(spec.id).then(() => scheduleSemanticHighlight());
-            }
-        },
-
-        preloadConceptHighlighterCache(concepts: any) {
-            preloadConceptCache(concepts).then(() => scheduleSemanticHighlight());
+        conceptClassificationsChanged() {
+            conceptClassifications.clear();
+            scheduleSemanticHighlight();
         },
 
         preloadKeywordHighlighterCache(keywords: any) {

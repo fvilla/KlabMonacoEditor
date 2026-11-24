@@ -9,6 +9,7 @@
     "outFile": "src/main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.js"
   },
   "include": [
+    "src/main/resources/org/integratedmodelling/klabeditor/monaco/klab-formatting.ts",
     "src/main/resources/org/integratedmodelling/klabeditor/monaco/monaco-bridge.ts"
   ]
 }

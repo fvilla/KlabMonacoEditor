@@ -50,7 +50,6 @@
             const params = new URLSearchParams(window.location.search || '');
             const language = params.get('language') || 'plaintext';
             const theme = params.get('theme') || 'vs-dark';
-            const highlighterServiceUrl = params.get('highlighterServiceUrl') || 'http://localhost:8765';
             let text = params.get('text') || '';
             // Allow very long text, but avoid accidental megabytes in debug runs
             if (text.length > 200000) {
@@ -60,7 +59,6 @@
               uri: "inmemory:///debug.kim",
               language,
               theme,
-              highlighterServiceUrl,
               text
             });
 

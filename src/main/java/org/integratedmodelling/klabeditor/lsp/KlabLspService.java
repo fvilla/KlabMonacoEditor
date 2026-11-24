@@ -47,7 +47,7 @@ public class KlabLspService {
     });
     private int versionCounter = 1;
     private LanguageDescriptor languageConfig;
-    private Map<String, String> conceptMap = new HashMap<>();
+    private Map<String, String> conceptMap = Map.of();
 
     // A successful singleton session cannot be reused by another server or user scope.
     // Keep the owner for this session's lifetime; replacing it requires a separate lifecycle.
@@ -102,7 +102,7 @@ public class KlabLspService {
                     LanguageDescriptor.class,
                     scope);
 
-            this.conceptMap = updateConceptMap(scope.getWorldview());
+            this.conceptMap = classifyWorldview(scope.getWorldview());
 
             launcher = Launcher.createLauncher(client, LanguageServer.class, lspServer.getInputStream(),
                     lspServer.getOutputStream(), executor, Function.identity());
@@ -126,7 +126,8 @@ public class KlabLspService {
         return true;
     }
 
-    private Map<String, String> updateConceptMap(Worldview worldview) {
+    public static Map<String, String> classifyWorldview(Worldview worldview) {
+        if (worldview == null) return Map.of();
         var conceptMap = new HashMap<String, String>();
         for (KimConceptStatement concept : worldview.allConceptStatements()) {
             String type = "UNKNOWN";
@@ -158,7 +159,7 @@ public class KlabLspService {
             }
             conceptMap.put(concept.getNamespace() + ":" + concept.getUrn(), type);
         }
-        return conceptMap;
+        return Map.copyOf(conceptMap);
     }
 
     public LanguageServer getServer() {

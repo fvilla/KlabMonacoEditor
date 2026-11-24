@@ -20,7 +20,6 @@ import netscape.javascript.JSObject;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Range;
-import org.integratedmodelling.klab.api.exceptions.KlabIllegalArgumentException;
 import org.integratedmodelling.klab.api.services.runtime.Notification;
 import org.integratedmodelling.klabeditor.lsp.KlabLspService;
 
@@ -121,7 +120,9 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
     private volatile String pendingDiagnosticsJson = null;
     private volatile Integer pendingCursorOffset = null;
     private volatile boolean pendingEditorFocus = false;
-    private volatile String pendingConceptHighlighterJson = null;
+    private static final ObjectMapper CONCEPT_JSON = new ObjectMapper();
+    private static final int MAX_CONCEPT_BATCH = 128;
+    private Map<String, String> conceptClassifications = Map.of();
     private volatile String pendingKeywordHighlighterJson = null;
     private volatile String pendingReviewMarkersJson = "[]";
     private volatile boolean reviewMode;
@@ -137,7 +138,6 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
     private String initialTheme = "vs-dark";
     private boolean showLineNumbers = true;
     private boolean showMinimap = true;
-    private String highlighterServiceUrl = "http://localhost:8765";
 
     private Consumer<String> changeListener;
     private final String documentUri;
@@ -146,11 +146,6 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
 
     public MonacoEditorView() {
         this(null, null);
-    }
-
-    public MonacoEditorView(int highlighterServicePort) {
-        this(null, null);
-        setHighlighterServicePort(highlighterServicePort);
     }
 
     public MonacoEditorView(String documentUri, Consumer<String> saveCallback) {
@@ -302,58 +297,27 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
         return documentUri;
     }
 
-    public void setHighlighterServicePort(int port) {
-        if (port <= 0 || port > 65535) {
-            throw new KlabIllegalArgumentException("Invalid highlighter service port: " + port);
-        }
-        setHighlighterServiceUrl("http://localhost:" + port);
+    /**
+     * Replace the classification snapshot. Pass an immutable map that can be shared among views.
+     * The WebView queries only the concepts used by its current document.
+     */
+    public void setConceptClassifications(Map<String, String> classifications) {
+        Objects.requireNonNull(classifications);
+        Runnable apply = () -> {
+            if (disposed || conceptClassifications == classifications) return;
+            conceptClassifications = classifications;
+            if (editorJsReady.get()) {
+                safeEval("window.MonacoBridge && window.MonacoBridge.conceptClassificationsChanged()");
+            }
+        };
+        if (Platform.isFxApplicationThread()) apply.run();
+        else Platform.runLater(apply);
     }
 
-    public void setHighlighterServiceUrl(String highlighterServiceUrl) {
-        if (highlighterServiceUrl == null || highlighterServiceUrl.isBlank()) {
-            this.highlighterServiceUrl = "http://localhost:8765";
-        } else {
-            this.highlighterServiceUrl = highlighterServiceUrl.replaceAll("/+$", "");
-        }
-        safeExec("window.MonacoBridge && window.MonacoBridge.configureHighlighter(" + jsString(
-                this.highlighterServiceUrl) + ");");
-        replayPendingHighlighterCaches();
-    }
-
-    public String getHighlighterServiceUrl() {
-        return highlighterServiceUrl;
-    }
-
+    /** @deprecated Use {@link #setConceptClassifications(Map)} for full snapshot replacement. */
+    @Deprecated
     public void preloadConceptHighlighterCache(Map<String, String> conceptCategories) {
-        if (conceptCategories == null || conceptCategories.isEmpty()) {
-            return;
-        }
-        try {
-            String json = new ObjectMapper().writeValueAsString(conceptCategories);
-            pendingConceptHighlighterJson = json;
-            safeExec(
-                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json +
-                            ");");
-        } catch (Exception e) {
-            System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
-            e.printStackTrace();
-        }
-    }
-
-    public void preloadConceptHighlighterCache(List<String> concepts) {
-        if (concepts == null || concepts.isEmpty()) {
-            return;
-        }
-        try {
-            String json = new ObjectMapper().writeValueAsString(concepts);
-            pendingConceptHighlighterJson = json;
-            safeExec(
-                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + json +
-                            ");");
-        } catch (Exception e) {
-            System.err.println("[MonacoEditorView] Failed to preload concept highlighter cache");
-            e.printStackTrace();
-        }
+        setConceptClassifications(Map.copyOf(conceptCategories));
     }
 
     public void preloadKeywordHighlighterCache(String language, List<String> keywords) {
@@ -631,8 +595,7 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
                 String base = url.toExternalForm();
                 String q = "?language=" + URLEncoder.encode(initialLanguage,
                         StandardCharsets.UTF_8) + "&theme=" + URLEncoder.encode(
-                        initialTheme, StandardCharsets.UTF_8) + "&highlighterServiceUrl=" + URLEncoder.encode(
-                        highlighterServiceUrl, StandardCharsets.UTF_8) + "&text=" + URLEncoder.encode(
+                        initialTheme, StandardCharsets.UTF_8) + "&text=" + URLEncoder.encode(
                         initialText, StandardCharsets.UTF_8);
                 webEngine.load(base + q);
             } else {
@@ -667,8 +630,7 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
         String js = "window.MonacoBridge && window.MonacoBridge.openDocument({saveAcknowledgementRequired:" + saveAcknowledgementRequired + "," + "uri:" + jsString(
                 uri) + "," + "language:" + jsString(language) + "," + "theme:" + jsString(
                 theme) + "," + "showLineNumbers:" + showLineNumbers + "," + "minimapVisible:" +
-                showMinimap + "," + "highlighterServiceUrl:" + jsString(
-                highlighterServiceUrl) + "," + "text:" + jsString(text) + "});";
+                showMinimap + "," + "text:" + jsString(text) + "});";
 
         safeExec(js);
     }
@@ -1142,11 +1104,7 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
         return '"' + esc + '"';
     }
 
-    private void replayPendingHighlighterCaches() {
-        if (pendingConceptHighlighterJson != null) {
-            safeExec(
-                    "window.MonacoBridge && window.MonacoBridge.preloadConceptHighlighterCache(" + pendingConceptHighlighterJson + ");");
-        }
+    private void replayPendingKeywords() {
         if (pendingKeywordHighlighterJson != null) {
             safeExec(
                     "window.MonacoBridge && window.MonacoBridge.preloadKeywordHighlighterCache(" + pendingKeywordHighlighterJson + ");");
@@ -1199,6 +1157,23 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
         }
 
 
+        public String classifyConcepts(String request) {
+            if (disposed || request == null || request.length() > 64 * 1024) return "{}";
+            try {
+                var concepts = CONCEPT_JSON.readValue(request, String[].class);
+                if (concepts == null || concepts.length > MAX_CONCEPT_BATCH) return "{}";
+                var result = new HashMap<String, String>();
+                for (String concept : concepts) {
+                    if (concept == null) continue;
+                    var classification = conceptClassifications.get(concept);
+                    if (classification != null) result.put(concept, classification);
+                }
+                return CONCEPT_JSON.writeValueAsString(result);
+            } catch (com.fasterxml.jackson.core.JsonProcessingException invalidRequest) {
+                return "{}";
+            }
+        }
+
         public void onEditorReady() {
             if (disposed) return;
             System.out.println("[MonacoEditorView] Editor ready (JS callback)");
@@ -1218,7 +1193,7 @@ public class MonacoEditorView extends StackPane implements AutoCloseable {
             // Initialize the editor only on the first ready signal after a page load. JS may emit
             // additional ready callbacks, and treating each one as a new initialization request can
             // recursively reopen the document.
-            replayPendingHighlighterCaches();
+            replayPendingKeywords();
             Platform.runLater(() -> {
                 initEditor(initialText, initialLanguage, initialTheme);
                 safeExec("window.MonacoBridge && window.MonacoBridge.setLineNumbers(" +

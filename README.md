@@ -237,13 +237,14 @@ tab, document, or window-close lifecycle instead. Repeated `close()` calls are s
 
 ## Highlighting support
 
-The editor can use a highlighter service and preload k.LAB keyword or concept metadata:
+The host can supply k.LAB keywords and an immutable snapshot of concept classifications:
 
 ```java
-editor.setHighlighterServiceUrl("http://localhost:8765");
 editor.preloadKeywordHighlighterCache("kim", keywords);
-editor.preloadConceptHighlighterCache(conceptCategories);
+editor.setConceptClassifications(conceptCategories);
 ```
+
+A new snapshot replaces the previous snapshot and recolors the current document in place. An empty map clears concept classifications. Each editor requests only the classifications used in its current document in batches of up to 128.
 
 These facilities are independent of `LspDocumentSession`; applications may use them with or without
 LSP document synchronization.
